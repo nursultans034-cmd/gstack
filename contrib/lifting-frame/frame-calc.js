@@ -508,6 +508,110 @@ function polarXY(a, r) {
   return { x: r * Math.sin(t), y: r * Math.cos(t) };
 }
 
+// ---------------------------------------------------------------------------
+// Автопроект: точки подвеса → высоты → труба → скобы → проушины рамы.
+
+// Скобы Green Pin P-6036 (болтовые, Heavy Duty): WLL, т; палец и зев, мм.
+// ОРИЕНТИРОВОЧНО — перед выпуском сверить с каталогом поставщика.
+export const SHACKLE_CATALOG = [
+  { wll: 120, pin: 95, jaw: 130 }, { wll: 150, pin: 108, jaw: 140 }, { wll: 200, pin: 120, jaw: 150 },
+  { wll: 250, pin: 130, jaw: 165 }, { wll: 300, pin: 150, jaw: 175 }, { wll: 400, pin: 175, jaw: 225 },
+  { wll: 500, pin: 185, jaw: 250 }, { wll: 600, pin: 205, jaw: 275 }, { wll: 700, pin: 215, jaw: 300 },
+  { wll: 800, pin: 230, jaw: 325 }, { wll: 900, pin: 250, jaw: 350 }, { wll: 1000, pin: 260, jaw: 375 },
+];
+
+const PLATES = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 80, 90, 100];
+const CHEEKS = [0, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50];
+
+export function pickShackle(load_t) {
+  return SHACKLE_CATALOG.find((s) => s.wll >= load_t) ?? null;
+}
+
+// Проушина под скобу: отверстие = палец + 3 %, толщина 75–100 % зева (без зажима скобы),
+// R по срезу, длина основания по корню с нагрузкой из плоскости. Цель — коэффициент ≤ target.
+export function designPadeye(F_kN, shackle, oop, target = 0.9) {
+  const F = F_kN * 1000;
+  const dPin = shackle.pin;
+  const dHole = dPin + Math.max(3, Math.ceil(dPin * 0.03));
+  const tMax = shackle.jaw - 10;
+  const tMin = 0.75 * shackle.jaw;
+  let best = null;
+  for (const tm of PLATES) {
+    for (const tc of CHEEKS) {
+      const t = tm + 2 * tc;
+      if (t > tMax || t < tMin || tc > tm) continue;
+      const Fy = Math.min(fyS355(tm), tc ? fyS355(tc) : Infinity);
+      if (F / (dPin * t) > 0.9 * Fy * target) continue;
+      // Тоньше всего, затем пластина ≈ 60 % общей толщины и щёчки не тоньше 20 мм.
+      const pen = Math.abs(tm - 0.6 * t) + (tc && tc < 20 ? 100 : 0);
+      if (!best || t < best.t - 4 || (Math.abs(t - best.t) <= 4 && pen < best.pen)) best = { tm, tc, t, Fy, pen };
+    }
+  }
+  if (!best) return null;
+  const { tm, tc, t, Fy } = best;
+  const Rreq = (F / (0.4 * Fy * target * t) + dHole) / 2;
+  const R = Math.ceil(Math.max(Rreq, dHole) / 5) * 5;
+  const e = Math.ceil((R + 100) / 10) / 100; // м: центр отверстия над основанием
+  const FyM = fyS355(tm);
+  const k = F / (tm * 0.6 * FyM) + (6 * F * oop * e * 1000) / (tm ** 2 * 0.75 * FyM);
+  const Lb = Math.max(Math.ceil(k / target / 50) * 50, 2 * R) / 1000; // м
+  return { tMain: tm, tCheek: tc, nCheek: tc ? 2 : 0, R, dHole, dPin, e, Lb };
+}
+
+// opts: { placePoints: bool, clearance: м над мачтой/рубкой }
+export function autoDesign(input, opts = {}) {
+  const inp = structuredClone(input);
+  const log = [];
+  const clearance = opts.clearance ?? 1.0;
+
+  if (opts.placePoints) {
+    const variants = optimizeLiftPoints(inp, inp.placement);
+    inp.points = variants[0].points;
+    log.push(`Точки подвеса: ${variants[0].polar.map((p) => `${p.a.toFixed(0)}° / R ${p.r.toFixed(2)} м`).join(', ')}; запас по ЦТ ${variants[0].margin.toFixed(2)} м.`);
+  }
+
+  const b = inp.buoy;
+  const obstacle = b.spider + b.hullH + Math.max(b.houseH, b.mast);
+  const zTop = Math.max(...inp.points.map((p) => p.z));
+  const lower = Math.max(1, Math.ceil((obstacle + clearance - inp.rigging.hwLower - zTop) * 10) / 10);
+  inp.rigging.lowerLength = lower;
+  log.push(`Нижние стропы ${lower.toFixed(1)} м: рама на ${(zTop + inp.rigging.hwLower + lower).toFixed(1)} м, мачта/рубка ${obstacle.toFixed(1)} м, зазор ≥ ${clearance} м.`);
+
+  inp.frame = { ...inp.frame, hMode: 'auto', sectionMode: 'auto', massMode: 'auto' };
+  let r = calculate(inp);
+  log.push(`Высота крюка над рамой h = ${r.h.toFixed(1)} м (угол ветвей ≥ ${inp.frame.minAngle}°).`);
+  log.push(`Труба рамы ${r.sec.name} S355, масса рамы ${r.frameMass.toFixed(2)} т; стержни ${r.maxUtil.toFixed(2)}.`);
+  if (r.noSection) log.push('В каталоге нет трубы, проходящей с заданной целью: нужна схема с диагоналями или другая геометрия.');
+
+  const legStatic = Math.max(...r.pts.map((p) => p.T)) / inp.factors.daf;
+  const shU = pickShackle(legStatic);
+  const pointStatic = Math.max(...r.pts.map((p) => p.P));
+  const shL = pickShackle(pointStatic);
+  if (shU) {
+    inp.rigging.shackleUpper = shU.wll;
+    const pad = designPadeye(r.Tmax * inp.factors.gammaPadeye * G, shU, inp.factors.outOfPlane);
+    if (pad) {
+      inp.padeye = pad;
+      log.push(`Скобы рамы ${shU.wll} т (палец ${shU.pin} мм). Проушина: пластина ${pad.tMain} мм${pad.nCheek ? ` + щёчки 2 × ${pad.tCheek} мм` : ''}, R ${pad.R} мм, отверстие Ø${pad.dHole}, основание ${(pad.Lb * 1000).toFixed(0)} мм.`);
+    } else {
+      log.push(`Проушину под скобу ${shU.wll} т подобрать не удалось — задайте вручную.`);
+    }
+  } else {
+    log.push(`Нет скобы на ${legStatic.toFixed(0)} т в каталоге.`);
+  }
+  if (shL) log.push(`Скобы у точек буя: не менее ${shL.wll} т (статика ${pointStatic.toFixed(1)} т).`);
+  for (const p of inp.points) {
+    if (opts.placePoints) p.wll = Math.max(p.wll, shL?.wll ?? 0);
+  }
+
+  r = calculate(inp);
+  const reqUpper = inp.rigging.sfReq * Math.max(...r.upper.map((u) => u.F));
+  const reqLower = inp.rigging.sfReq * Math.max(...r.lower.map((u) => u.F));
+  log.push(`Требуемый MBL стропов: верх ≥ ${reqUpper.toFixed(0)} кН, низ ≥ ${reqLower.toFixed(0)} кН (запас ${inp.rigging.sfReq}).`);
+  log.push(`Кран: F_ст ${r.Fst.toFixed(1)} т → не менее ${r.craneRec} т на вылете; крюк ${r.hook.toFixed(1)} м над низом буя.`);
+  return { input: inp, result: r, log, reqUpper, reqLower, shackleLower: shL };
+}
+
 // Исходные данные: буй CALM TR1224 (КТК-Р, проект 1-1962-0).
 export const PRESET_TR1224 = {
   cargo: { name: 'Буй CALM TR1224', mass: 320, kWeight: 1.1, kCoG: 1.1, xg: 0, yg: 0 },
@@ -529,6 +633,8 @@ export const PRESET_TR1224 = {
   // Корпус Ø12 × 5,3 м, спайдер ~1,5 м, рубка Ø9 × 4 м, навигационная мачта ~8 м над палубой.
   buoy: { hullD: 12, hullH: 5.3, spider: 1.5, houseD: 9, houseH: 4, mast: 8 },
   // Подбор новых точек: кольцо между рубкой и бортом, сектор мачты (~300°) закрыт.
+  // Автопроект: по умолчанию работаем с существующими проушинами (к TR1224 варить нельзя).
+  auto: { placePoints: false, clearance: 1.0 },
   placement: { n: 3, rMin: 4.8, rMax: 5.6, sectors: '290-310', cogE: 0.3, wll: 300, minGap: 60, sMin: 0.1, z: 7.3 },
 };
 

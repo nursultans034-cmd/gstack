@@ -81,6 +81,16 @@ svg text { font-family: var(--f-mono); fill: var(--ink); }
 details summary { cursor: pointer; font-weight: 500; }
 textarea { width: 100%; min-height: 140px; font: 12px var(--f-mono); background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 3px; padding: 6px; }
 .err { color: var(--bad); font-weight: 500; }
+fieldset.auto { border-color: var(--accent); }
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 10px; }
+.steps li { padding-left: 2px; }
+.steps input[type=file] { display: block; margin: 6px 0; max-width: 100%; font-size: 13px; }
+.check { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 6px 0; }
+.ex input { width: 90px; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 2px 4px; font-family: var(--f-mono); font-size: 12px; }
+.ex td { white-space: normal; vertical-align: top; }
+.ex td, .ex th { text-align: left; }
+.ex .src { color: var(--muted); font-size: 12px; max-width: 220px; }
+.log { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
@@ -93,11 +103,29 @@ textarea { width: 100%; min-height: 140px; font: 12px var(--f-mono); background:
     <div class="toolbar">
       <button id="loadPreset">Вернуть данные TR1224</button>
       <button id="copyReport">Копировать отчёт</button>
+      <button id="saveReport" hidden>Сохранить отчёт</button>
     </div>
   </header>
 
   <div class="grid">
     <form class="inputs" id="form" autocomplete="off">
+      <fieldset class="auto">
+        <legend>Автопроект по документам буя</legend>
+        <ol class="steps">
+          <li><b>Документы.</b> Весовой отчёт, общий вид, схема подъёма, чертежи надстройки и проушин: PDF или фото.
+            <input type="file" id="docs" multiple accept=".pdf,application/pdf,image/png,image/jpeg,image/webp" aria-label="Документы буя">
+            <div class="toolbar"><button type="button" class="primary" id="readDocs">Считать данные</button><button type="button" id="stopRead" hidden>Стоп</button></div>
+            <p class="hint" id="readMsg">Claude прочитает документы и найдёт массу, ЦТ, размеры, мачты и проушины. Ничего не попадёт в расчёт без вашего подтверждения.</p>
+          </li>
+          <li><b>Проверка.</b> Считанные значения появятся справа: отметьте, что перенести в форму.</li>
+          <li><b>Автопроект.</b> Программа подберёт высоты, стропы, трубу рамы, скобы и проушины и проверит схему.
+            <label class="check"><input type="checkbox" id="auto.placePoints"> подобрать новые точки подвеса (иначе — существующие проушины)</label>
+            <div class="fields"><div class="field"><label for="auto.clearance">Зазор рамы над мачтой, м</label><input id="auto.clearance" type="number" step="0.1"></div></div>
+            <div class="toolbar" style="margin-top:8px"><button type="button" class="primary" id="runAuto">Подобрать раму</button></div>
+          </li>
+        </ol>
+      </fieldset>
+
       <fieldset>
         <legend>Буй</legend>
         <div class="fields">
@@ -225,6 +253,7 @@ textarea { width: 100%; min-height: 140px; font: 12px var(--f-mono); background:
           <div class="toolbar" style="margin-top:6px">
             <button type="button" id="copyJson">Копировать</button>
             <button type="button" id="applyJson">Применить из поля</button>
+            <button type="button" id="saveJson" hidden>Сохранить файл</button>
             <label class="hint" style="margin:0;align-self:center"><input type="file" id="fileJson" accept=".json,application/json"> из файла</label>
           </div>
           <p class="hint" id="jsonMsg">Данные формы также запоминаются в этом браузере.</p>
@@ -237,7 +266,7 @@ textarea { width: 100%; min-height: 140px; font: 12px var(--f-mono); background:
 </div>
 
 <script type="module">
-import { calculate, polar, PRESET_TR1224, optimizeLiftPoints, cogMargin } from './frame-calc.js';
+import { calculate, polar, PRESET_TR1224, optimizeLiftPoints, cogMargin, autoDesign } from './frame-calc.js';
 
 
 const STORE = 'lifting-frame-input-v1';
@@ -245,6 +274,7 @@ let state = load() ?? structuredClone(PRESET_TR1224);
 let last = null;
 
 function load() { try { const s = localStorage.getItem(STORE); return s ? { ...structuredClone(PRESET_TR1224), ...JSON.parse(s) } : null; } catch { return null; } }
+const prefs = { extract: null, auto: null };
 function save() { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch { /* браузер без хранилища */ } }
 
 const $ = (id) => document.getElementById(id);
@@ -254,7 +284,7 @@ const pill = (u, lim = 1) => `<span class="pill ${u > lim ? 'bad' : u > 0.9 * li
 function fillForm() {
   for (const el of document.querySelectorAll('#form [id*="."]')) {
     const [g, k] = el.id.split('.');
-    if (state[g] && k in state[g]) el.value = state[g][k];
+    if (state[g] && k in state[g]) { if (el.type === 'checkbox') el.checked = !!state[g][k]; else el.value = state[g][k]; }
   }
   renderPoints();
   $('json').value = JSON.stringify(state, null, 2);
@@ -300,7 +330,8 @@ $('form').addEventListener('input', (e) => {
     } else p[m[2]] = v;
   } else if (el.id.includes('.') && el.id !== 'json') {
     const [g, k] = el.id.split('.');
-    state[g][k] = el.type === 'number' || el.id === 'placement.n' ? parseFloat(el.value) : el.value;
+    if (!state[g] || el.closest('#extract')) return;
+    state[g][k] = el.type === 'checkbox' ? el.checked : el.type === 'number' || el.id === 'placement.n' ? parseFloat(el.value) : el.value;
   } else return;
   update();
 });
@@ -362,6 +393,210 @@ function optionsCard() {
   </div>`;
 }
 
+// ---- Считывание документов (Claude) и автопроект ----
+let sample = null, downloads = null, readCtl = null;
+window.claude?.use('sample').then((s) => { sample = s; caps(); });
+window.claude?.use('downloads').then((d) => { downloads = d; caps(); });
+function caps() {
+  $('readDocs').disabled = !sample;
+  if (!sample) $('readMsg').textContent = 'Чтение документов доступно, когда страница открыта в Claude. Данные можно ввести вручную.';
+  $('saveReport').hidden = !downloads;
+  $('saveJson').hidden = !downloads;
+}
+caps();
+$('readMsg').dataset.idle = $('readMsg').textContent;
+
+function loadScript(src) {
+  return new Promise((ok, fail) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = fail; document.head.append(el); });
+}
+async function pdfLib() {
+  if (!window.pdfjsLib) {
+    const base = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+    try {
+      await loadScript(base + 'pdf.min.js');
+      await loadScript(base + 'pdf.worker.min.js'); // рабочий поток в основной вкладке: Worker с CDN запрещён
+    } catch { throw new Error('не загрузилась библиотека чтения PDF — проверьте сеть или загрузите страницы как изображения'); }
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.js';
+  }
+  return window.pdfjsLib;
+}
+
+// Текст из PDF + изображения страниц (для сканов и чертежей).
+async function collect(files, maxImages, say) {
+  const texts = [], images = [];
+  for (const file of files) {
+    if (file.type.startsWith('image/')) { if (images.length < maxImages) images.push(file); texts.push(`[Изображение: ${file.name}]`); continue; }
+    const lib = await pdfLib();
+    const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    for (let n = 1; n <= Math.min(pdf.numPages, 40); n++) {
+      say(`Читаю ${file.name}: страница ${n} из ${pdf.numPages}`);
+      const page = await pdf.getPage(n);
+      const tc = await page.getTextContent();
+      const txt = tc.items.map((i) => i.str).join(' ').replace(/\s+/g, ' ').trim();
+      texts.push(`--- ${file.name}, стр. ${n} ---\n${txt.slice(0, 8000) || '(текста нет — смотрите изображение страницы)'}`);
+      if (images.length < maxImages && (txt.length < 400 || n <= 2)) {
+        const vp0 = page.getViewport({ scale: 1 });
+        const vp = page.getViewport({ scale: Math.min(3, 2000 / Math.max(vp0.width, vp0.height)) });
+        const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+        await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+        images.push(await new Promise((ok) => cv.toBlob(ok, 'image/jpeg', 0.85)));
+        texts.push(`[Изображение страницы: ${file.name}, стр. ${n}]`);
+      }
+    }
+  }
+  return { text: texts.join('\n\n').slice(0, 180000), images };
+}
+
+const FIELD = '{"value": ..., "source": "документ, стр./раздел или null"}';
+const EXTRACT_PROMPT = `Ты инженер по подъёмным операциям. Из документов по бую CALM (текст и изображения ниже) извлеки исходные данные для расчёта подъёмной рамы.
+Правила: ничего не выдумывай; если значения нет — value: null. Для каждого значения укажи источник (файл, страница, таблица или чертёж). Если размер снят по масштабу чертежа — напиши в source «по масштабу».
+Система координат: центр буя в плане; углы от 0° по часовой стрелке, как на чертежах буя; x = R·sin(угол), y = R·cos(угол). Высоты z — от самого низа буя (низ спайдера/юбки). Если высоты даны от палубы или днища, пересчитай и напиши это в source.
+Ответь ТОЛЬКО JSON такого вида (каждое поле — ${FIELD}):
+{"name": ..., "mass_t": ..., "weighed": (value true/false — масса по взвешиванию?), "cog_x_m": ..., "cog_y_m": ..., "cog_z_m": ...,
+ "hull_diameter_m": ..., "hull_height_m": ..., "spider_height_m": ..., "house_diameter_m": ..., "house_height_m": ..., "mast_height_above_deck_m": ...,
+ "lift_points": (value — массив {"name": str, "angle_deg": num, "radius_m": num, "z_m": num|null, "wll_t": num|null}),
+ "forbidden_sectors": (value — массив {"from_deg": num, "to_deg": num, "what": str}: мачты, турель, клюзы, стопоры, шланговые линии и другое оборудование, над/у которого нельзя ставить точки подвеса),
+ "no_welding": (value true/false — запрещена ли приварка к бую),
+ "notes": [строки — важные ограничения и замечания], "missing": [строки — чего не хватает для расчёта]}`;
+
+$('readDocs').addEventListener('click', async () => {
+  const files = [...$('docs').files];
+  const say = (t) => { $('readMsg').textContent = t; };
+  if (!files.length) { say('Сначала выберите файлы.'); return; }
+  readCtl = new AbortController();
+  $('readDocs').disabled = true; $('stopRead').hidden = false;
+  try {
+    const lim = await sample.limits().catch(() => null);
+    const { text, images } = await collect(files, lim?.images?.maxCount ?? 0, say);
+    say(images.length ? `Отправляю Claude текст и ${images.length} изобр. Чтение занимает до пары минут…` : 'Отправляю Claude текст документов…');
+    const data = await sample.json(`${EXTRACT_PROMPT}\n\n${text}`, {
+      images: images.length ? images : undefined, modelTier: 'complex', signal: readCtl.signal,
+      onText: ({ text: t }) => say(`Claude пишет ответ… ${t.length} символов`),
+    });
+    prefs.extract = normalizeExtract(data);
+    say('Готово. Проверьте значения справа и перенесите нужные в форму.');
+    update();
+    $('out').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    const msg = {
+      cancelled: 'Остановлено.', not_granted: 'Доступ к Claude не разрешён для этой страницы.',
+      rate_limited: 'Слишком много запросов — попробуйте через несколько минут.', invalid_json: 'Ответ не разобран — нажмите «Считать данные» ещё раз.',
+      prompt_too_large: 'Документы слишком большие — загрузите только нужные листы.', image_rejected: 'Одно из изображений не принято — проверьте формат файла.',
+    }[e?.code] ?? `Не удалось прочитать документы${e?.message ? `: ${e.message}` : ''}.`;
+    say(msg);
+  } finally {
+    $('readDocs').disabled = !sample; $('stopRead').hidden = true;
+  }
+});
+$('stopRead').addEventListener('click', () => readCtl?.abort());
+
+function val(o) { return o && typeof o === 'object' && 'value' in o ? o.value : o; }
+function src(o) { return o && typeof o === 'object' ? o.source ?? '' : ''; }
+const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(+v) ? null : +v);
+function normalizeExtract(d) {
+  const rows = [
+    ['cargo.name', 'Наименование', val(d.name), src(d.name), 'text'],
+    ['cargo.mass', 'Масса, т', num(val(d.mass_t)), src(d.mass_t)],
+    ['cargo.kWeight', 'k веса', val(d.weighed) === true ? 1.03 : val(d.weighed) === false ? 1.1 : null, val(d.weighed) === null || val(d.weighed) === undefined ? '' : `${val(d.weighed) ? 'взвешен' : 'расчётная масса'} — ${src(d.weighed)}`],
+    ['cargo.xg', 'ЦТ x, м', num(val(d.cog_x_m)), src(d.cog_x_m)],
+    ['cargo.yg', 'ЦТ y, м', num(val(d.cog_y_m)), src(d.cog_y_m)],
+    ['buoy.hullD', 'Корпус Ø, м', num(val(d.hull_diameter_m)), src(d.hull_diameter_m)],
+    ['buoy.hullH', 'Высота корпуса, м', num(val(d.hull_height_m)), src(d.hull_height_m)],
+    ['buoy.spider', 'Спайдер, м', num(val(d.spider_height_m)), src(d.spider_height_m)],
+    ['buoy.houseD', 'Рубка Ø, м', num(val(d.house_diameter_m)), src(d.house_diameter_m)],
+    ['buoy.houseH', 'Высота рубки, м', num(val(d.house_height_m)), src(d.house_height_m)],
+    ['buoy.mast', 'Мачта над палубой, м', num(val(d.mast_height_above_deck_m)), src(d.mast_height_above_deck_m)],
+  ].map(([key, label, value, source, type]) => ({ key, label, value, source, type: type ?? 'number', use: value !== null && value !== undefined && value !== '' }));
+  const pts = (Array.isArray(val(d.lift_points)) ? val(d.lift_points) : [])
+    .map((p, i) => ({ name: String(p.name ?? `${p.angle_deg}°`), a: num(p.angle_deg), r: num(p.radius_m), z: num(p.z_m), wll: num(p.wll_t), i }))
+    .filter((p) => p.a !== null && p.r !== null);
+  const sectors = (Array.isArray(val(d.forbidden_sectors)) ? val(d.forbidden_sectors) : [])
+    .filter((s) => num(s.from_deg) !== null && num(s.to_deg) !== null)
+    .map((s) => ({ from: +s.from_deg, to: +s.to_deg, what: String(s.what ?? '') }));
+  return {
+    rows, pts, ptsSource: src(d.lift_points), usePts: pts.length >= 3,
+    sectors, sectorsSource: src(d.forbidden_sectors), useSectors: sectors.length > 0,
+    noWelding: val(d.no_welding) === true,
+    notes: Array.isArray(d.notes) ? d.notes.map(String) : [], missing: Array.isArray(d.missing) ? d.missing.map(String) : [],
+  };
+}
+
+function extractCard() {
+  const x = prefs.extract;
+  if (!x) return '';
+  return `<div class="card" id="extract"><h2>Считано из документов</h2>
+    <div class="scroll"><table class="ex">
+      <thead><tr><th>Взять</th><th>Параметр</th><th>Значение</th><th>Источник</th></tr></thead>
+      <tbody>${x.rows.map((r, i) => `<tr><td><input type="checkbox" id="ex${i}.use" ${r.use ? 'checked' : ''} aria-label="Взять"></td><td>${esc(r.label)}</td>
+        <td><input id="ex${i}.value" type="${r.type}" value="${r.value === null || r.value === undefined ? '' : esc(r.value)}" aria-label="${esc(r.label)}"></td><td class="src">${esc(r.source || 'не найдено')}</td></tr>`).join('')}
+      <tr><td><input type="checkbox" id="ex.pts" ${x.usePts ? 'checked' : ''} ${x.pts.length < 3 ? 'disabled' : ''} aria-label="Взять точки"></td><td>Точки подвеса</td>
+        <td class="num">${x.pts.length ? x.pts.map((p) => `${esc(p.name)}: ${f(p.a, 0)}° / ${f(p.r, 2)} м${p.z !== null ? ` / z ${f(p.z, 1)}` : ''}${p.wll !== null ? ` / ${f(p.wll, 0)} т` : ''}`).join('<br>') : 'не найдены'}</td><td class="src">${esc(x.ptsSource || '')}</td></tr>
+      <tr><td><input type="checkbox" id="ex.sectors" ${x.useSectors ? 'checked' : ''} ${x.sectors.length ? '' : 'disabled'} aria-label="Взять секторы"></td><td>Запретные секторы</td>
+        <td class="num">${x.sectors.length ? x.sectors.map((s) => `${f(s.from, 0)}–${f(s.to, 0)}° ${esc(s.what)}`).join('<br>') : 'не найдены'}</td><td class="src">${esc(x.sectorsSource || '')}</td></tr>
+      </tbody></table></div>
+    ${x.noWelding ? '<p class="status bad" style="margin:8px 0 0">В документах: приварка к бую запрещена. Новые точки подвеса недопустимы — автопроект работает с существующими проушинами.</p>' : ''}
+    ${x.missing.length ? `<p class="hint"><b>Не хватает:</b> ${x.missing.map(esc).join('; ')}</p>` : ''}
+    ${x.notes.length ? `<p class="hint"><b>Замечания:</b> ${x.notes.map(esc).join('; ')}</p>` : ''}
+    <div class="toolbar" style="margin-top:8px"><button type="button" class="primary" id="applyExtract">Перенести в форму</button><button type="button" id="dropExtract">Скрыть</button></div>
+  </div>`;
+}
+
+$('out').addEventListener('click', (e) => {
+  if (e.target.id === 'dropExtract') { prefs.extract = null; update(); return; }
+  if (e.target.id !== 'applyExtract') return;
+  const x = prefs.extract;
+  x.rows.forEach((r, i) => {
+    if (!$(`ex${i}.use`).checked) return;
+    const raw = $(`ex${i}.value`).value;
+    const v = r.type === 'number' ? parseFloat(raw) : raw;
+    if (r.type === 'number' && !Number.isFinite(v)) return;
+    const [g, k] = r.key.split('.');
+    state[g][k] = v;
+  });
+  if ($('ex.pts')?.checked && x.pts.length >= 3) {
+    const zDef = state.points[0]?.z ?? 5;
+    state.points = x.pts.map((p) => ({ name: p.name, ...polar(p.a, p.r), z: p.z ?? zDef, wll: p.wll ?? 100 }));
+  }
+  if ($('ex.sectors')?.checked && x.sectors.length) {
+    state.placement.sectors = x.sectors.map((s) => `${Math.round(s.from)}-${Math.round(s.to)}`).join('; ');
+  }
+  if (x.noWelding) state.auto.placePoints = false;
+  prefs.extract = null;
+  fillForm(); update();
+});
+
+$('runAuto').addEventListener('click', () => {
+  const btn = $('runAuto');
+  btn.disabled = true; btn.textContent = 'Подбираю…';
+  setTimeout(() => {
+    try {
+      const res = autoDesign(structuredClone(state), { placePoints: !!state.auto.placePoints, clearance: state.auto.clearance });
+      state = res.input;
+      prefs.auto = { log: res.log };
+      fillForm();
+    } catch (err) { prefs.auto = { error: err.message }; }
+    btn.disabled = false; btn.textContent = 'Подобрать раму';
+    update();
+    $('out').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 20);
+});
+
+function autoCard() {
+  const a = prefs.auto;
+  if (!a) return '';
+  if (a.error) return `<div class="status bad">Автопроект не выполнен: ${esc(a.error)}</div>`;
+  return `<div class="card"><h2>Автопроект</h2><ul class="log">${a.log.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+    <p class="hint">Все подобранные значения перенесены в форму слева, их можно поправить вручную. Размеры скоб — ориентировочно по Green Pin P-6036, сверьте с каталогом.</p></div>`;
+}
+
+async function saveFile(filename, data) {
+  try { await downloads.save({ filename, data }); }
+  catch (e) { if (e?.code !== 'declined') flash('Файл не сохранён'); }
+}
+const slug = () => (state.cargo.name || 'буй').replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 40);
+$('saveReport').addEventListener('click', () => saveFile(`Рама_${slug()}.txt`, reportText()));
+$('saveJson').addEventListener('click', () => saveFile(`Данные_${slug()}.json`, JSON.stringify(state, null, 2)));
+
 function applyJson(text) {
   try {
     const obj = JSON.parse(text);
@@ -409,7 +644,7 @@ function render(r) {
   const issues = verdict(r);
   const maxP = Math.max(...r.pts.map((p) => p.P / p.wll));
   const minSF = Math.min(...r.upper.map((u) => u.sf), ...r.lower.map((u) => u.sf));
-  $('out').innerHTML = optionsCard() + `
+  $('out').innerHTML = extractCard() + autoCard() + optionsCard() + `
     <div class="status ${issues.length ? 'bad' : 'ok'}">${issues.length ? 'Схема не проходит:' : 'Все проверки пройдены. Схема работоспособна в рамках принятых допущений.'}
       ${issues.length ? `<ul>${issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}</div>
 
@@ -560,6 +795,7 @@ function reportText() {
   L.push(`Запас стропов: верх мин. ${f(Math.min(...r.upper.map((u) => u.sf)), 2)}, низ мин. ${f(Math.min(...r.lower.map((u) => u.sf)), 2)}`);
   L.push(`Кран: F_ст = ${f(r.Fst)} т → рекомендуется ≥ ${r.craneRec} т на рабочем вылете`);
   L.push(`Высота крюка над низом буя ≈ ${f(r.hook, 2)} м; зазор рамы над мачтой ${f(r.clearance, 2)} м`);
+  if (prefs.auto?.log) { L.push(''); L.push('АВТОПРОЕКТ:'); prefs.auto.log.forEach((l) => L.push(`- ${l}`)); }
   const issues = verdict(r);
   L.push('');
   L.push(issues.length ? `НЕ ПРОХОДИТ:\n- ${issues.join('\n- ')}` : 'Все проверки пройдены.');

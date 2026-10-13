@@ -1,5 +1,5 @@
 // Сверка ядра с расчётной запиской TR1224 (CLAUDE.md проекта). Запуск: node contrib/lifting-frame/verify.mjs
-import { calculate, PRESET_TR1224, optimizeLiftPoints, cogMargin } from './frame-calc.js';
+import { calculate, PRESET_TR1224, optimizeLiftPoints, cogMargin, autoDesign, governingUtil } from './frame-calc.js';
 
 const r = calculate(structuredClone(PRESET_TR1224));
 const expect = [
@@ -51,4 +51,12 @@ const cur = calculate(structuredClone(P1));
 const better = Math.max(...o2[0].shares) <= Math.max(...cur.shares) + 1e-6 && !inMast;
 if (!better) fail++;
 console.log(`${better ? 'OK  ' : 'FAIL'} подбор, ЦТ (0,4; −0,2), мачта 290–310: ${o2[0].polar.map((p) => p.a.toFixed(0) + '°/' + p.r.toFixed(2)).join(', ')}; макс. доля ${Math.max(...o2[0].shares).toFixed(3)} против ${Math.max(...cur.shares).toFixed(3)} у текущих; запас по ЦТ ${o2[0].margin.toFixed(2)} м против ${cogMargin(P1.points, 0.4, -0.2).toFixed(2)}`);
+
+// Автопроект: из одних данных буя — точки, рама, скобы, проушины; схема должна проходить целиком.
+const ad = autoDesign(structuredClone(PRESET_TR1224), { placePoints: true, clearance: 1.0 });
+const g = governingUtil(ad.result, ad.input);
+const adOk = g.util <= 1 && !ad.result.noSection && ad.result.clearance >= 1.0 - 1e-6;
+if (!adOk) fail++;
+console.log(`${adOk ? 'OK  ' : 'FAIL'} автопроект: схема ${g.util.toFixed(2)} (${g.governs})`);
+for (const l of ad.log) console.log('     ' + l);
 process.exit(fail ? 1 : 0);
