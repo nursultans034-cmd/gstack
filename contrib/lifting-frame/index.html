@@ -1,0 +1,513 @@
+<meta charset="utf-8">
+<title>Расчёт подъёмной рамы</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: инженерный лист — слева исходные данные, справа схема и результаты; на телефоне в одну колонку. */
+:root {
+  --bg: #f3f4f1; --panel: #ffffff; --ink: #1b2126; --muted: #5b646b; --line: #d5d9d4;
+  --accent: #1f5f8b; --accent-soft: #e2edf5; --steel: #44525c;
+  --ok: #2f7a45; --ok-soft: #e3f1e6; --warn: #a86400; --warn-soft: #fbefd9; --bad: #b3261e; --bad-soft: #f9e1df;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161a; --panel: #1a2026; --ink: #e4e8ea; --muted: #97a2a9; --line: #2e373e;
+  --accent: #6fb0dc; --accent-soft: #1c3344; --steel: #a8b6bf;
+  --ok: #6cc486; --ok-soft: #173222; --warn: #e3a64a; --warn-soft: #3a2a12; --bad: #f08a80; --bad-soft: #3d1a17;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #12161a; --panel: #1a2026; --ink: #e4e8ea; --muted: #97a2a9; --line: #2e373e;
+  --accent: #6fb0dc; --accent-soft: #1c3344; --steel: #a8b6bf;
+  --ok: #6cc486; --ok-soft: #173222; --warn: #e3a64a; --warn-soft: #3a2a12; --bad: #f08a80; --bad-soft: #3d1a17;
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--f-body); margin: 0; padding: 20px 16px 40px; }
+.wrap { max-width: 1380px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; border-bottom: 2px solid var(--ink); padding-bottom: 10px; }
+h1 { font: 600 26px/1.1 var(--f-display); margin: 0; letter-spacing: .01em; text-wrap: balance; }
+.sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+button, select, input { font: inherit; color: inherit; }
+button { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--panel); border-color: var(--accent); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.grid { display: grid; grid-template-columns: minmax(330px, 420px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.inputs { display: grid; gap: 12px; min-width: 0; }
+#preset { max-width: 100%; }
+fieldset { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; margin: 0; padding: 10px 12px 12px; min-width: 0; }
+legend { font: 600 12px var(--f-display); text-transform: uppercase; letter-spacing: .08em; color: var(--accent); padding: 0 4px; }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
+.field { display: grid; gap: 2px; min-width: 0; }
+.field label { font-size: 12px; color: var(--muted); }
+.field input, .field select { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; font-family: var(--f-mono); font-size: 13px; }
+.field.wide { grid-column: 1 / -1; }
+.hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+th { font: 500 11px var(--f-display); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+td.wrap { white-space: normal; }
+td.num { font-family: var(--f-mono); font-size: 13px; }
+.pts input { width: 64px; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 3px 4px; font-family: var(--f-mono); font-size: 13px; text-align: right; }
+.pts input.name { width: 58px; text-align: left; }
+.pts button { padding: 2px 7px; }
+.out { display: grid; gap: 16px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; min-width: 0; }
+.card h2 { font: 600 15px var(--f-display); margin: 0 0 8px; letter-spacing: .02em; text-transform: uppercase; }
+.summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.kpi { background: var(--panel); padding: 10px 12px; display: grid; gap: 2px; }
+.kpi .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.kpi .v { font: 500 22px var(--f-mono); font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.kpi .v small { font-size: 13px; color: var(--muted); }
+.pill { display: inline-block; font: 500 12px var(--f-mono); padding: 1px 7px; border-radius: 10px; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.bad { background: var(--bad-soft); color: var(--bad); }
+.status { padding: 10px 14px; border-radius: 4px; border-left: 4px solid; font-weight: 500; }
+.status.ok { background: var(--ok-soft); border-color: var(--ok); }
+.status.bad { background: var(--bad-soft); border-color: var(--bad); }
+.status ul { margin: 6px 0 0; padding-left: 18px; font-weight: 400; }
+.drawings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 700px) { .drawings { grid-template-columns: minmax(0, 1fr); } }
+svg { width: 100%; height: auto; display: block; }
+svg text { font-family: var(--f-mono); fill: var(--ink); }
+.cols2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.formula { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+details summary { cursor: pointer; font-weight: 500; }
+textarea { width: 100%; min-height: 140px; font: 12px var(--f-mono); background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 3px; padding: 6px; }
+.err { color: var(--bad); font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Расчёт подъёмной рамы</h1>
+      <div class="sub">Крюк → верхние ветви → рама из труб → вертикальные стропы → груз · DNV-ST-N001, AISC ASD 9-е изд., S355</div>
+    </div>
+    <div class="toolbar">
+      <select id="preset" aria-label="Пример исходных данных">
+        <option value="tr1224">Буй TR1224 (320 т, 3 точки)</option>
+        <option value="rect4">Пример: 4 точки, прямоугольник</option>
+      </select>
+      <button id="loadPreset">Загрузить</button>
+      <button id="copyReport">Копировать отчёт</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <form class="inputs" id="form" autocomplete="off">
+      <fieldset>
+        <legend>Груз</legend>
+        <div class="fields">
+          <div class="field wide"><label for="cargo.name">Наименование</label><input id="cargo.name" type="text"></div>
+          <div class="field"><label for="cargo.mass">Масса, т</label><input id="cargo.mass" type="number" step="0.1"></div>
+          <div class="field"><label for="cargo.kWeight">k веса (1,10 / 1,03 взвеш.)</label><input id="cargo.kWeight" type="number" step="0.01"></div>
+          <div class="field"><label for="cargo.xg">ЦТ x, м</label><input id="cargo.xg" type="number" step="0.01"></div>
+          <div class="field"><label for="cargo.yg">ЦТ y, м</label><input id="cargo.yg" type="number" step="0.01"></div>
+          <div class="field"><label for="cargo.kCoG">k ЦТ</label><input id="cargo.kCoG" type="number" step="0.01"></div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Точки подвеса</legend>
+        <div class="scroll">
+          <table class="pts">
+            <thead><tr><th>Точка</th><th>Угол °</th><th>R, м</th><th>x, м</th><th>y, м</th><th>z, м</th><th>WLL, т</th><th></th></tr></thead>
+            <tbody id="ptsBody"></tbody>
+          </table>
+        </div>
+        <div class="toolbar" style="margin-top:8px"><button type="button" id="addPt">+ точка</button></div>
+        <p class="hint">Угол от 0° по часовой стрелке; x = R·sin, y = R·cos. z — высота точки над низом груза. WLL — проушины/скобы груза.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Коэффициенты</legend>
+        <div class="fields">
+          <div class="field"><label for="factors.daf">DAF</label><input id="factors.daf" type="number" step="0.01"></div>
+          <div class="field"><label for="factors.skl">SKL (для 4+ точек)</label><input id="factors.skl" type="number" step="0.01"></div>
+          <div class="field"><label for="factors.gammaMember">γ стержней рамы</label><input id="factors.gammaMember" type="number" step="0.01"></div>
+          <div class="field"><label for="factors.gammaPadeye">γ проушин и узлов</label><input id="factors.gammaPadeye" type="number" step="0.01"></div>
+          <div class="field"><label for="factors.outOfPlane">Из плоскости, доля</label><input id="factors.outOfPlane" type="number" step="0.01"></div>
+          <div class="field"><label for="factors.E">E, МПа</label><input id="factors.E" type="number" step="1000"></div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Рама</legend>
+        <div class="fields">
+          <div class="field"><label for="frame.hMode">Высота крюка над рамой</label>
+            <select id="frame.hMode"><option value="auto">по мин. углу</option><option value="manual">задать</option></select></div>
+          <div class="field"><label for="frame.h">h, м (если задать)</label><input id="frame.h" type="number" step="0.1"></div>
+          <div class="field"><label for="frame.minAngle">Мин. угол ветви, °</label><input id="frame.minAngle" type="number" step="1"></div>
+          <div class="field"><label for="frame.topology">Схема</label>
+            <select id="frame.topology"><option value="perimeter">контур</option><option value="diagonals">контур + диагонали</option></select></div>
+          <div class="field"><label for="frame.sectionMode">Сечение трубы</label>
+            <select id="frame.sectionMode"><option value="manual">задать</option><option value="auto">подобрать</option></select></div>
+          <div class="field"><label for="frame.targetUtil">Цель подбора, ≤</label><input id="frame.targetUtil" type="number" step="0.05"></div>
+          <div class="field"><label for="frame.D">D, мм</label><input id="frame.D" type="number" step="0.1"></div>
+          <div class="field"><label for="frame.t">t, мм</label><input id="frame.t" type="number" step="0.5"></div>
+          <div class="field"><label for="frame.massMode">Масса рамы</label>
+            <select id="frame.massMode"><option value="manual">задать</option><option value="auto">трубы × k узлов</option></select></div>
+          <div class="field"><label for="frame.manualMass">Масса, т (если задать)</label><input id="frame.manualMass" type="number" step="0.1"></div>
+          <div class="field"><label for="frame.nodeFactor">k узлов и проушин</label><input id="frame.nodeFactor" type="number" step="0.1"></div>
+          <div class="field"><label for="frame.K">K (расч. длина)</label><input id="frame.K" type="number" step="0.1"></div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Верхние проушины рамы</legend>
+        <div class="fields">
+          <div class="field"><label for="padeye.tMain">Пластина, мм</label><input id="padeye.tMain" type="number" step="1"></div>
+          <div class="field"><label for="padeye.tCheek">Щёчка, мм</label><input id="padeye.tCheek" type="number" step="1"></div>
+          <div class="field"><label for="padeye.nCheek">Число щёчек</label><input id="padeye.nCheek" type="number" step="1" min="0"></div>
+          <div class="field"><label for="padeye.R">R, мм</label><input id="padeye.R" type="number" step="5"></div>
+          <div class="field"><label for="padeye.dHole">Отверстие, мм</label><input id="padeye.dHole" type="number" step="1"></div>
+          <div class="field"><label for="padeye.dPin">Палец скобы, мм</label><input id="padeye.dPin" type="number" step="1"></div>
+          <div class="field"><label for="padeye.e">Плечо до отверстия, м</label><input id="padeye.e" type="number" step="0.01"></div>
+          <div class="field"><label for="padeye.Lb">Длина основания, м</label><input id="padeye.Lb" type="number" step="0.01"></div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Такелаж, кран и габариты</legend>
+        <div class="fields">
+          <div class="field"><label for="rigging.lowerLength">Нижний строп, м</label><input id="rigging.lowerLength" type="number" step="0.1"></div>
+          <div class="field"><label for="rigging.hwLower">Скобы низа, м</label><input id="rigging.hwLower" type="number" step="0.1"></div>
+          <div class="field"><label for="rigging.hwUpper">Звенья/крюк верха, м</label><input id="rigging.hwUpper" type="number" step="0.1"></div>
+          <div class="field"><label for="site.obstacle">Препятствие над низом груза, м</label><input id="site.obstacle" type="number" step="0.1"></div>
+          <div class="field"><label for="rigging.lowerMass">Нижний такелаж, т</label><input id="rigging.lowerMass" type="number" step="0.1"></div>
+          <div class="field"><label for="rigging.upperMass">Верхний такелаж, т</label><input id="rigging.upperMass" type="number" step="0.1"></div>
+          <div class="field"><label for="rigging.upperMBL">MBL верхних, кН</label><input id="rigging.upperMBL" type="number" step="1"></div>
+          <div class="field"><label for="rigging.lowerMBL">MBL нижних, кН</label><input id="rigging.lowerMBL" type="number" step="1"></div>
+          <div class="field"><label for="rigging.sfReq">Требуемый запас стропа</label><input id="rigging.sfReq" type="number" step="0.05"></div>
+          <div class="field"><label for="rigging.shackleUpper">WLL скоб рамы, т</label><input id="rigging.shackleUpper" type="number" step="5"></div>
+        </div>
+        <p class="hint">Запас стропа задайте по DNV-ST-N001 (γsf с учётом заделок и перегиба).</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Сохранить / загрузить</legend>
+        <details>
+          <summary>Исходные данные в JSON</summary>
+          <textarea id="json" aria-label="Исходные данные JSON" spellcheck="false"></textarea>
+          <div class="toolbar" style="margin-top:6px">
+            <button type="button" id="copyJson">Копировать</button>
+            <button type="button" id="applyJson">Применить из поля</button>
+            <label class="hint" style="margin:0;align-self:center"><input type="file" id="fileJson" accept=".json,application/json"> из файла</label>
+          </div>
+          <p class="hint" id="jsonMsg">Данные формы также запоминаются в этом браузере.</p>
+        </details>
+      </fieldset>
+    </form>
+
+    <main class="out" id="out"></main>
+  </div>
+</div>
+
+<script type="module">
+import { calculate, polar, PRESET_TR1224 } from './frame-calc.js';
+
+const PRESETS = {
+  tr1224: PRESET_TR1224,
+  rect4: {
+    ...structuredClone(PRESET_TR1224),
+    cargo: { name: 'Пример: прямоугольный груз 20 × 10 м', mass: 172.2, kWeight: 1.03, kCoG: 1.1, xg: 0.3, yg: 0.1 },
+    points: [
+      { name: 'A', x: 10, y: 5, z: 7.11, wll: 100 }, { name: 'B', x: 10, y: -5, z: 7.11, wll: 100 },
+      { name: 'C', x: -10, y: -5, z: 7.11, wll: 100 }, { name: 'D', x: -10, y: 5, z: 7.11, wll: 100 },
+    ],
+    frame: { ...PRESET_TR1224.frame, sectionMode: 'auto', massMode: 'auto', targetUtil: 0.9, nodeFactor: 1.5 },
+    rigging: { ...PRESET_TR1224.rigging, lowerLength: 3, lowerMass: 1.5, upperMass: 3, upperMBL: 4500, lowerMBL: 4500 },
+    padeye: { ...PRESET_TR1224.padeye, tMain: 50, tCheek: 25, R: 220, dHole: 110, dPin: 105 },
+    site: { obstacle: 7.11 },
+  },
+};
+
+const STORE = 'lifting-frame-input-v1';
+let state = load() ?? structuredClone(PRESET_TR1224);
+let last = null;
+
+function load() { try { const s = localStorage.getItem(STORE); return s ? JSON.parse(s) : null; } catch { return null; } }
+function save() { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch { /* браузер без хранилища */ } }
+
+const $ = (id) => document.getElementById(id);
+const f = (v, d = 1) => (Number.isFinite(v) ? v.toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—');
+const pill = (u, lim = 1) => `<span class="pill ${u > lim ? 'bad' : u > 0.9 * lim ? 'warn' : 'ok'}">${u >= 9.9 ? 'отказ' : f(u, 2)}</span>`;
+
+function fillForm() {
+  for (const el of document.querySelectorAll('#form [id*="."]')) {
+    const [g, k] = el.id.split('.');
+    if (state[g] && k in state[g]) el.value = state[g][k];
+  }
+  renderPoints();
+  $('json').value = JSON.stringify(state, null, 2);
+}
+
+function renderPoints() {
+  $('ptsBody').innerHTML = state.points.map((p, i) => {
+    const ang = ((Math.atan2(p.x, p.y) * 180) / Math.PI + 360) % 360;
+    const R = Math.hypot(p.x, p.y);
+    return `<tr data-i="${i}">
+      <td><input class="name" id="pt${i}.name" value="${esc(p.name)}" aria-label="Имя точки"></td>
+      <td><input id="pt${i}.ang" type="number" step="1" value="${+ang.toFixed(1)}" aria-label="Угол"></td>
+      <td><input id="pt${i}.r" type="number" step="0.05" value="${+R.toFixed(3)}" aria-label="Радиус"></td>
+      <td><input id="pt${i}.x" type="number" step="0.01" value="${+p.x.toFixed(3)}" aria-label="x"></td>
+      <td><input id="pt${i}.y" type="number" step="0.01" value="${+p.y.toFixed(3)}" aria-label="y"></td>
+      <td><input id="pt${i}.z" type="number" step="0.1" value="${p.z}" aria-label="z"></td>
+      <td><input id="pt${i}.wll" type="number" step="5" value="${p.wll}" aria-label="WLL"></td>
+      <td><button type="button" data-del="${i}" aria-label="Удалить точку">×</button></td></tr>`;
+  }).join('');
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }
+
+$('form').addEventListener('input', (e) => {
+  const el = e.target;
+  const m = el.id.match(/^pt(\d+)\.(\w+)$/);
+  if (m) {
+    const p = state.points[+m[1]];
+    const v = parseFloat(el.value);
+    if (m[2] === 'name') p.name = el.value;
+    else if (!Number.isFinite(v)) return;
+    else if (m[2] === 'ang' || m[2] === 'r') {
+      const tr = el.closest('tr');
+      const c = polar(parseFloat(tr.querySelector('[id$=".ang"]').value) || 0, parseFloat(tr.querySelector('[id$=".r"]').value) || 0);
+      p.x = c.x; p.y = c.y;
+      tr.querySelector('[id$=".x"]').value = +c.x.toFixed(3);
+      tr.querySelector('[id$=".y"]').value = +c.y.toFixed(3);
+    } else if (m[2] === 'x' || m[2] === 'y') {
+      p[m[2]] = v;
+      const tr = el.closest('tr');
+      tr.querySelector('[id$=".ang"]').value = +(((Math.atan2(p.x, p.y) * 180) / Math.PI + 360) % 360).toFixed(1);
+      tr.querySelector('[id$=".r"]').value = +Math.hypot(p.x, p.y).toFixed(3);
+    } else p[m[2]] = v;
+  } else if (el.id.includes('.') && el.id !== 'json') {
+    const [g, k] = el.id.split('.');
+    state[g][k] = el.type === 'number' ? parseFloat(el.value) : el.value;
+  } else return;
+  update();
+});
+
+$('ptsBody').addEventListener('click', (e) => {
+  const i = e.target.dataset.del;
+  if (i === undefined) return;
+  state.points.splice(+i, 1);
+  renderPoints(); update();
+});
+$('addPt').addEventListener('click', () => {
+  state.points.push({ name: `P${state.points.length + 1}`, ...polar(0, 5), z: state.points[0]?.z ?? 5, wll: 100 });
+  renderPoints(); update();
+});
+$('loadPreset').addEventListener('click', () => { state = structuredClone(PRESETS[$('preset').value]); fillForm(); update(); });
+$('copyJson').addEventListener('click', () => copy(JSON.stringify(state, null, 2), $('json'), $('jsonMsg')));
+$('applyJson').addEventListener('click', () => applyJson($('json').value));
+$('fileJson').addEventListener('change', async (e) => { const file = e.target.files[0]; if (file) applyJson(await file.text()); });
+$('copyReport').addEventListener('click', () => copy(reportText(), null, null));
+
+function applyJson(text) {
+  try {
+    const obj = JSON.parse(text);
+    if (!Array.isArray(obj.points) || !obj.cargo) throw new Error('нет полей cargo / points');
+    state = { ...structuredClone(PRESET_TR1224), ...obj };
+    fillForm(); update();
+    $('jsonMsg').textContent = 'Данные загружены.';
+  } catch (err) { $('jsonMsg').textContent = `JSON не принят: ${err.message}. Проверьте синтаксис.`; }
+}
+
+async function copy(text, fallbackEl, msgEl) {
+  try { await navigator.clipboard.writeText(text); if (msgEl) msgEl.textContent = 'Скопировано.'; flash('Скопировано'); }
+  catch {
+    if (fallbackEl) { fallbackEl.select(); if (msgEl) msgEl.textContent = 'Текст выделен — нажмите Ctrl+C.'; }
+    else { $('json').closest('details').open = true; $('json').value = text; $('json').select(); flash('Текст в поле JSON выделен — Ctrl+C'); }
+  }
+}
+function flash(t) { const b = $('copyReport'); const o = b.textContent; b.textContent = t; setTimeout(() => { b.textContent = o; }, 1600); }
+
+function update() {
+  save();
+  $('json').value = JSON.stringify(state, null, 2);
+  try { last = calculate(structuredClone(state)); render(last); }
+  catch (err) { last = null; $('out').innerHTML = `<div class="status bad">Расчёт невозможен: ${esc(err.message)}</div>`; }
+}
+
+function verdict(r) {
+  const issues = [];
+  const req = state.rigging.sfReq;
+  r.pts.forEach((p) => { if (p.P > p.wll) issues.push(`точка ${p.name}: статика ${f(p.P)} т > WLL ${p.wll} т`); });
+  r.members.forEach((m) => { if (m.check.util > 1) issues.push(`стержень ${m.label}: коэффициент ${m.check.util >= 9.9 ? 'отказ' : f(m.check.util, 2)}${m.check.warnings.length ? ` (${m.check.warnings.join(', ')})` : ''}`); });
+  if (r.mechanism) issues.push('схема рамы изменяема — добавьте диагонали');
+  if (r.padeye.util > 1) issues.push(`проушина рамы: коэффициент ${f(r.padeye.util, 2)}`);
+  r.upper.forEach((u) => { if (u.sf < req) issues.push(`верхний строп ${u.name}: запас ${f(u.sf, 2)} < ${req}`); });
+  r.lower.forEach((u) => { if (u.sf < req) issues.push(`нижний строп ${u.name}: запас ${f(u.sf, 2)} < ${req}`); });
+  r.upper.forEach((u) => { if (u.shackle > state.rigging.shackleUpper) issues.push(`скоба рамы ${u.name}: ${f(u.shackle)} т > WLL ${state.rigging.shackleUpper} т`); });
+  if (r.pts.some((p) => p.angle < state.frame.minAngle - 0.05)) issues.push(`угол ветви меньше ${state.frame.minAngle}° — увеличьте h`);
+  if (r.clearance < 0.5) issues.push(`зазор рамы над препятствием ${f(r.clearance, 2)} м < 0,5 м`);
+  if (r.pts.some((p) => p.lowerLen <= 0)) issues.push('длина нижнего стропа ≤ 0');
+  if (r.noSection) issues.push('в каталоге нет трубы, проходящей с заданной целью');
+  return issues;
+}
+
+function render(r) {
+  const issues = verdict(r);
+  const maxP = Math.max(...r.pts.map((p) => p.P / p.wll));
+  const minSF = Math.min(...r.upper.map((u) => u.sf), ...r.lower.map((u) => u.sf));
+  $('out').innerHTML = `
+    <div class="status ${issues.length ? 'bad' : 'ok'}">${issues.length ? 'Схема не проходит:' : 'Все проверки пройдены. Схема работоспособна в рамках принятых допущений.'}
+      ${issues.length ? `<ul>${issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}</div>
+
+    <div class="summary">
+      <div class="kpi"><span class="k">Кран, F ст</span><span class="v">${f(r.Fst)} <small>т</small></span><span class="hint">рекоменд. ≥ ${r.craneRec} т на вылете</span></div>
+      <div class="kpi"><span class="k">Крюк над низом груза</span><span class="v">${f(r.hook, 2)} <small>м</small></span><span class="hint">+ палуба, опоры, зазор</span></div>
+      <div class="kpi"><span class="k">Рама</span><span class="v">${esc(r.sec.name)}</span><span class="hint">${f(r.frameMass, 2)} т · h = ${f(r.h, 1)} м</span></div>
+      <div class="kpi"><span class="k">Макс. стержни</span><span class="v">${r.maxUtil >= 9.9 ? 'отказ' : f(r.maxUtil, 2)}</span><span class="hint">AISC H1-1/H1-2</span></div>
+      <div class="kpi"><span class="k">Мин. запас строп</span><span class="v">${f(minSF, 2)}</span><span class="hint">треб. ${state.rigging.sfReq}</span></div>
+      <div class="kpi"><span class="k">Точки груза / WLL</span><span class="v">${f(maxP, 2)}</span><span class="hint">макс. статика / WLL</span></div>
+    </div>
+
+    <div class="drawings">
+      <div class="card"><h2>План рамы</h2>${planSvg(r)}<p class="hint">Усилия в стержнях, кН (− сжатие). Стрелки — горизонтальные составляющие ветвей к крюку.</p></div>
+      <div class="card"><h2>Вид сбоку (развёртка)</h2>${elevSvg(r)}<p class="hint">Высоты от низа груза, м.</p></div>
+    </div>
+
+    <div class="card"><h2>1. Нагрузки на точки и верхние ветви</h2>
+      <p class="formula">W_р = ${f(state.cargo.mass)} · ${state.cargo.kWeight} = ${f(r.Wd)} т · SKL = ${r.skl} · P = W_р·s·k_ЦТ·SKL · V = (W_р + рама + низ. такелаж)·s·k_ЦТ·SKL·DAF · T = V·L/h</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Точка</th><th>Доля s</th><th>P, т</th><th>P/WLL</th><th>V, т</th><th>Плечо, м</th><th>L ветви, м</th><th>Угол °</th><th>T, т</th><th>H, т</th><th>Низ. строп, м</th></tr></thead>
+        <tbody>${r.pts.map((p) => `<tr><td>${esc(p.name)}</td><td class="num">${f(p.share, 4)}</td><td class="num">${f(p.P)}</td><td>${pill(p.P / p.wll)}</td><td class="num">${f(p.V)}</td><td class="num">${f(p.d, 2)}</td><td class="num">${f(p.Lleg, 2)}</td><td class="num">${f(p.angle)}</td><td class="num">${f(p.T)}</td><td class="num">${f(p.H)}</td><td class="num">${f(p.lowerLen, 2)}</td></tr>`).join('')}</tbody>
+      </table></div>
+      <p class="hint">Требуемая h при угле ${state.frame.minAngle}°: ${f(r.hReq, 2)} м, принято ${f(r.h, 1)} м. Невязка ΣH = ${f(r.sumH, 3)} т.</p>
+    </div>
+
+    <div class="card"><h2>2. Стержни рамы · труба ${esc(r.sec.name)} S355</h2>
+      <p class="formula">A = ${f(r.sec.A, 0)} мм² · I = ${f(r.sec.I / 1e4, 0)} см⁴ · S = ${f(r.sec.S / 1e3, 0)} см³ · r = ${f(r.sec.r, 1)} мм · ${f(r.sec.massPerM, 1)} кг/м · F_y = ${r.members[0].check.Fy} МПа · C_c = ${f(r.members[0].check.Cc, 1)} · труб ${f(r.pipeMass, 2)} т</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Стержень</th><th>L, м</th><th>N, кН</th><th>λ</th><th>F_a</th><th>f_a</th><th>f_b</th><th>F′e</th><th>H1-1</th><th>H1-2</th><th>Прогиб, мм</th></tr></thead>
+        <tbody>${r.members.map((m) => { const c = m.check; return `<tr><td>${esc(m.label)}</td><td class="num">${f(m.L, 2)}</td><td class="num">${f(m.N)}</td><td class="num">${f(c.lam)}</td><td class="num">${f(c.Fa)}</td><td class="num">${f(c.fa)}</td><td class="num">${f(c.fb)}</td><td class="num">${f(c.Fe)}</td><td>${pill(c.H11)}</td><td>${pill(c.H12)}</td><td class="num">${f(c.defl)}</td></tr>`; }).join('')}</tbody>
+      </table></div>
+      <p class="hint">f_a = N·γ/A; f_b — от собственного веса трубы (wL²/8)·DAF·γ; напряжения в МПа. ${r.tried ? `Подбор: ${r.tried.map((t) => `${t.name} → ${t.util >= 9.9 ? 'отказ' : f(t.util, 2)}`).join('; ')}.` : ''}</p>
+    </div>
+
+    <div class="cols2">
+      <div class="card"><h2>3. Верхние проушины рамы</h2>
+        <p class="formula">F = T_max·γ = ${f(r.Tmax)} · ${state.factors.gammaPadeye} = ${f(r.Tmax * state.factors.gammaPadeye)} т · t = ${r.padeye.t} мм · F_y = ${r.padeye.Fy} МПа</p>
+        <table><tbody>
+          <tr><td class="wrap">Растяжение по ослабл. сечению</td><td class="num">${f(r.padeye.tension.f)} / ${f(r.padeye.tension.allow)}</td><td>${pill(r.padeye.tension.u)}</td></tr>
+          <tr><td class="wrap">Срез (вырыв)</td><td class="num">${f(r.padeye.shear.f)} / ${f(r.padeye.shear.allow)}</td><td>${pill(r.padeye.shear.u)}</td></tr>
+          <tr><td class="wrap">Смятие под пальцем</td><td class="num">${f(r.padeye.bearing.f)} / ${f(r.padeye.bearing.allow)}</td><td>${pill(r.padeye.bearing.u)}</td></tr>
+          ${r.padeye.base ? `<tr><td class="wrap">Корень: осевое + из плоскости</td><td class="num">${f(r.padeye.base.fa)} + ${f(r.padeye.base.fb)}</td><td>${pill(r.padeye.base.u)}</td></tr>` : ''}
+          <tr><td class="wrap">Зазор отверстие − палец</td><td class="num">${f(r.padeye.clearance, 0)} мм (${f(r.padeye.clearancePct)} %)</td><td></td></tr>
+          <tr><td class="wrap">Сила из плоскости</td><td class="num">${f(r.padeye.oopForce)} кН</td><td></td></tr>
+        </tbody></table>
+      </div>
+      <div class="card"><h2>4. Такелаж</h2>
+        <div class="scroll"><table>
+          <thead><tr><th>Точка</th><th>Верх, кН</th><th>Запас</th><th>Скоба, т</th><th>Низ, кН</th><th>Запас</th></tr></thead>
+          <tbody>${r.upper.map((u, i) => `<tr><td>${esc(u.name)}</td><td class="num">${f(u.F, 0)}</td><td>${sfPill(u.sf)}</td><td class="num">${f(u.shackle)}</td><td class="num">${f(r.lower[i].F, 0)}</td><td>${sfPill(r.lower[i].sf)}</td></tr>`).join('')}</tbody>
+        </table></div>
+        <p class="hint">Скоба — статическое натяжение ветви T/DAF, сравнивается с WLL ${state.rigging.shackleUpper} т. Мастер-звено: статическая нагрузка на крюк ${f(r.Fst)} т.</p>
+      </div>
+    </div>
+
+    <div class="card"><h2>Не охвачено расчётом</h2>
+      <p class="hint">Узлы рамы (пластина сквозь трубу, кольца жёсткости), сварные швы, эксцентриситет в узлах — рекомендуется FEA узлов. Доля массы рамы распределяется по тем же долям, что и груз. Крюк считается над ЦТ груза. Схема проверяется для ровного положения; при k_ЦТ огибающая берётся одновременно по всем точкам.</p>
+    </div>`;
+}
+
+function sfPill(sf) { const req = state.rigging.sfReq; return `<span class="pill ${sf < req ? 'bad' : sf < req * 1.1 ? 'warn' : 'ok'}">${f(sf, 2)}</span>`; }
+
+function planSvg(r) {
+  const P = r.pts;
+  const xs = P.map((p) => p.x).concat(state.cargo.xg), ys = P.map((p) => p.y).concat(state.cargo.yg);
+  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1);
+  const W = 420, pad = 60, s = (W - 2 * pad) / span;
+  const cx = (Math.max(...xs) + Math.min(...xs)) / 2, cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+  const X = (x) => W / 2 + (x - cx) * s, Y = (y) => W / 2 - (y - cy) * s;
+  const gx = X(state.cargo.xg), gy = Y(state.cargo.yg);
+  const mem = r.members.map((m) => {
+    const a = P[m.i], b = P[m.j];
+    const mx = (X(a.x) + X(b.x)) / 2, my = (Y(a.y) + Y(b.y)) / 2;
+    const col = m.check.util > 1 ? 'var(--bad)' : 'var(--steel)';
+    return `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="${col}" stroke-width="5" stroke-linecap="round"/>
+      <rect x="${mx - 30}" y="${my - 9}" width="60" height="17" rx="2" fill="var(--panel)" stroke="var(--line)"/>
+      <text x="${mx}" y="${my + 4}" font-size="11" text-anchor="middle">${f(m.N, 0)}</text>`;
+  }).join('');
+  const arrows = P.map((p) => {
+    const L = Math.min(40, p.d * s * 0.45), ux = p.d ? (state.cargo.xg - p.x) / p.d : 0, uy = p.d ? (state.cargo.yg - p.y) / p.d : 0;
+    const x1 = X(p.x), y1 = Y(p.y), x2 = x1 + ux * L, y2 = y1 - uy * L;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--accent)" stroke-width="2" marker-end="url(#ah)"/>`;
+  }).join('');
+  const nodes = P.map((p) => {
+    const ox = X(p.x) - gx, oy = Y(p.y) - gy, d = Math.hypot(ox, oy) || 1;
+    return `<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="6" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/>
+      <text x="${X(p.x) + (ox / d) * 26}" y="${Y(p.y) + (oy / d) * 22 + 4}" font-size="12" text-anchor="middle" font-weight="500">${esc(p.name)}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${W}" role="img" aria-label="План рамы">
+    <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--accent)"/></marker></defs>
+    <line x1="${W - 24}" y1="40" x2="${W - 24}" y2="14" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah)"/><text x="${W - 24}" y="54" font-size="10" text-anchor="middle" fill="var(--muted)">0°</text>
+    ${mem}${arrows}${nodes}
+    <circle cx="${gx}" cy="${gy}" r="8" fill="none" stroke="var(--ink)"/><path d="M${gx - 8} ${gy}H${gx + 8}M${gx} ${gy - 8}V${gy + 8}" stroke="var(--ink)"/>
+    <text x="${gx + 10}" y="${gy + 18}" font-size="10" fill="var(--muted)">ЦТ / крюк</text>
+  </svg>`;
+}
+
+function elevSvg(r) {
+  const P = r.pts;
+  const dMax = Math.max(...P.map((p) => p.d), 1);
+  const H = r.hook, W = 460, Ht = 420, padX = 64, padT = 20, padB = 30;
+  const sy = (Ht - padT - padB) / H, sx = Math.min((W - 2 * padX) / (2 * dMax), sy);
+  const X = (d) => W / 2 + d * sx, Y = (z) => Ht - padB - z * sy;
+  const side = P.map((p, i) => (i % 2 ? -1 : 1) * p.d);
+  const zF = r.zFrame, zTop = Math.max(...P.map((p) => p.z));
+  const cargoW = dMax * 1.15;
+  const lines = P.map((p, i) => `
+    <line x1="${X(0)}" y1="${Y(r.hook)}" x2="${X(side[i])}" y2="${Y(zF)}" stroke="var(--accent)" stroke-width="2"/>
+    <line x1="${X(side[i])}" y1="${Y(zF)}" x2="${X(side[i])}" y2="${Y(p.z)}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 3"/>
+    <circle cx="${X(side[i])}" cy="${Y(p.z)}" r="3.5" fill="var(--ink)"/>
+    <text x="${(X(0) + X(side[i])) / 2 + (side[i] > 0 ? 8 : -8)}" y="${(Y(r.hook) + Y(zF)) / 2 + i * 13}" font-size="10" text-anchor="${side[i] > 0 ? 'start' : 'end'}">${esc(p.name)}: ${f(p.angle)}°</text>`).join('');
+  const tick = (z, label) => `<line x1="${padX - 8}" y1="${Y(z)}" x2="${W - padX + 8}" y2="${Y(z)}" stroke="var(--line)" stroke-dasharray="2 3"/><text x="${padX - 10}" y="${Y(z) + 4}" font-size="10" text-anchor="end">${f(z, 1)}</text><text x="${W - padX + 10}" y="${Y(z) + 4}" font-size="10" fill="var(--muted)">${label}</text>`;
+  return `<svg viewBox="0 0 ${W} ${Ht}" role="img" aria-label="Вид сбоку">
+    ${tick(0, 'низ')}${tick(zTop, 'точки')}${tick(zF, 'рама')}${tick(r.hook, 'крюк')}
+    ${state.site.obstacle > 0 ? `<line x1="${X(-cargoW * 0.15)}" y1="${Y(zTop)}" x2="${X(-cargoW * 0.15)}" y2="${Y(state.site.obstacle)}" stroke="var(--warn)" stroke-width="3"/><text x="${X(-cargoW * 0.15) + 6}" y="${Y(state.site.obstacle) + 4}" font-size="10" fill="var(--warn)">препятствие</text>` : ''}
+    <rect x="${X(-cargoW)}" y="${Y(zTop * 0.85)}" width="${2 * cargoW * sx}" height="${zTop * 0.85 * sy}" fill="var(--accent-soft)" stroke="var(--steel)"/>
+    <text x="${X(0)}" y="${Y(zTop * 0.4)}" font-size="11" text-anchor="middle">${esc(state.cargo.name)}</text>
+    ${lines}
+    <line x1="${X(-dMax)}" y1="${Y(zF)}" x2="${X(dMax)}" y2="${Y(zF)}" stroke="var(--steel)" stroke-width="6" stroke-linecap="round"/>
+    <path d="M${X(0)} ${Y(r.hook) - 14}v8a6 6 0 1 1 -6 6" fill="none" stroke="var(--ink)" stroke-width="2.5"/>
+    <text x="${X(0) + 8}" y="${(Y(r.hook) + Y(zF)) / 2 - 30}" font-size="10" fill="var(--muted)">h = ${f(r.h, 1)}</text>
+  </svg>`;
+}
+
+function reportText() {
+  const r = last;
+  if (!r) return 'Расчёт невозможен — проверьте исходные данные.';
+  const L = [];
+  L.push(`РАСЧЁТ ПОДЪЁМНОЙ РАМЫ — ${state.cargo.name}`);
+  L.push(`Масса ${state.cargo.mass} т × k_вес ${state.cargo.kWeight} = ${f(r.Wd)} т; ЦТ (${state.cargo.xg}; ${state.cargo.yg}) м; k_ЦТ ${state.cargo.kCoG}; DAF ${state.factors.daf}; SKL ${r.skl}`);
+  L.push(`Рама: труба ${r.sec.name} S355, масса ${f(r.frameMass, 2)} т, h = ${f(r.h, 1)} м над рамой`);
+  L.push('');
+  L.push('Точка | доля | P, т | P/WLL | V, т | L ветви, м | угол | T, т | H, т');
+  r.pts.forEach((p) => L.push(`${p.name} | ${f(p.share, 4)} | ${f(p.P)} | ${f(p.P / p.wll, 2)} | ${f(p.V)} | ${f(p.Lleg, 2)} | ${f(p.angle)}° | ${f(p.T)} | ${f(p.H)}`));
+  L.push('');
+  L.push('Стержень | L, м | N, кН | λ | F_a | f_a | H1-1 | H1-2 | прогиб, мм');
+  r.members.forEach((m) => L.push(`${m.label} | ${f(m.L, 2)} | ${f(m.N)} | ${f(m.check.lam)} | ${f(m.check.Fa)} | ${f(m.check.fa)} | ${f(m.check.H11, 2)} | ${f(m.check.H12, 2)} | ${f(m.check.defl)}`));
+  L.push('');
+  L.push(`Проушины рамы: растяжение ${f(r.padeye.tension.u, 2)}, срез ${f(r.padeye.shear.u, 2)}, смятие ${f(r.padeye.bearing.u, 2)}${r.padeye.base ? `, корень ${f(r.padeye.base.u, 2)}` : ''}`);
+  L.push(`Запас стропов: верх мин. ${f(Math.min(...r.upper.map((u) => u.sf)), 2)}, низ мин. ${f(Math.min(...r.lower.map((u) => u.sf)), 2)}`);
+  L.push(`Кран: F_ст = ${f(r.Fst)} т → рекомендуется ≥ ${r.craneRec} т на рабочем вылете`);
+  L.push(`Высота крюка над низом груза ≈ ${f(r.hook, 2)} м; зазор рамы над препятствием ${f(r.clearance, 2)} м`);
+  const issues = verdict(r);
+  L.push('');
+  L.push(issues.length ? `НЕ ПРОХОДИТ:\n- ${issues.join('\n- ')}` : 'Все проверки пройдены.');
+  return L.join('\n');
+}
+
+fillForm();
+update();
+</script>
