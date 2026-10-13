@@ -34,9 +34,4 @@ for (const [name, got, want, tol] of expect) {
 for (const m of r.members) console.log(`     ${m.label}: L=${m.L.toFixed(2)} N=${m.N.toFixed(1)} λ=${m.check.lam.toFixed(1)} Fa=${m.check.Fa.toFixed(1)} fa=${m.check.fa.toFixed(1)} H1-1=${m.check.H11.toFixed(3)} H1-2=${m.check.H12.toFixed(3)} δ=${m.check.defl.toFixed(1)}`);
 const auto = calculate({ ...structuredClone(PRESET_TR1224), frame: { ...PRESET_TR1224.frame, sectionMode: 'auto', massMode: 'auto' } });
 console.log(`Автоподбор: ${auto.sec.name}, max ${auto.maxUtil.toFixed(2)}, рама ${auto.frameMass.toFixed(2)} т`);
-const rect = calculate({ ...structuredClone(PRESET_TR1224), points: [
-  { name: 'A', x: 10, y: 5, z: 7, wll: 100 }, { name: 'B', x: 10, y: -5, z: 7, wll: 100 },
-  { name: 'C', x: -10, y: -5, z: 7, wll: 100 }, { name: 'D', x: -10, y: 5, z: 7, wll: 100 }],
-  cargo: { ...PRESET_TR1224.cargo, mass: 172.2, xg: 0.5, yg: 0.2 } });
-console.log(`4 точки: доли ${rect.shares.map((s) => s.toFixed(3)).join(' ')}, механизм=${rect.mechanism}, max ${rect.maxUtil.toFixed(2)}`);
 process.exit(fail ? 1 : 0);

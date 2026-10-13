@@ -278,7 +278,11 @@ function runWithSection(input, sec) {
   const zFrame = zTop + rigging.hwLower + rigging.lowerLength;
   const hook = zFrame + h + rigging.hwUpper;
   for (const p of pts) p.lowerLen = zFrame - rigging.hwLower - p.z;
-  const clearance = zFrame - input.site.obstacle;
+  // Габарит буя: палуба = спайдер + корпус; выше палубы — рубка и мачты.
+  const b = input.buoy;
+  const deck = b.spider + b.hullH;
+  const obstacle = deck + Math.max(b.houseH, b.mast);
+  const clearance = zFrame - obstacle;
 
   const Fst = Wd + frameMass + rigging.lowerMass + rigging.upperMass;
   const craneRec = Math.ceil((Fst * 1.1) / 10) * 10;
@@ -286,7 +290,7 @@ function runWithSection(input, sec) {
   return {
     sec, Wd, skl, shares, pts, h, hReq, members: memberResults, mechanism: truss.mechanism,
     sumH: Math.hypot(sumHx, sumHy), maxUtil, pipeMass, frameMass, padeye, Tmax, upper, lower,
-    zFrame, hook, clearance, Fst, craneRec,
+    zFrame, hook, deck, obstacle, clearance, Fst, craneRec,
   };
 }
 
@@ -325,7 +329,8 @@ export const PRESET_TR1224 = {
     lowerLength: 8.5, hwLower: 0.8, hwUpper: 0, lowerMass: 2.0, upperMass: 4.5,
     upperMBL: 7599, lowerMBL: 7599, sfReq: 3.0, shackleUpper: 250,
   },
-  site: { obstacle: 14.8 },
+  // Корпус Ø12 × 5,3 м, спайдер ~1,5 м, рубка Ø9 × 4 м, навигационная мачта ~8 м над палубой.
+  buoy: { hullD: 12, hullH: 5.3, spider: 1.5, houseD: 9, houseH: 4, mast: 8 },
 };
 
 export function polar(angleDeg, r) {
