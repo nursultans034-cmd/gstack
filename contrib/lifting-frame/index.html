@@ -136,6 +136,24 @@ textarea { width: 100%; min-height: 140px; font: 12px var(--f-mono); background:
       </fieldset>
 
       <fieldset>
+        <legend>Подбор точек подвеса</legend>
+        <div class="fields">
+          <div class="field"><label for="placement.n">Число точек</label>
+            <select id="placement.n"><option value="3">3</option><option value="4">4</option></select></div>
+          <div class="field"><label for="placement.wll">WLL новых точек, т</label><input id="placement.wll" type="number" step="5"></div>
+          <div class="field"><label for="placement.rMin">Радиус от, м</label><input id="placement.rMin" type="number" step="0.05"></div>
+          <div class="field"><label for="placement.rMax">Радиус до, м</label><input id="placement.rMax" type="number" step="0.05"></div>
+          <div class="field wide"><label for="placement.sectors">Запретные секторы, ° (мачты, турель, клюзы)</label><input id="placement.sectors" type="text" placeholder="290-310; 350-10"></div>
+          <div class="field"><label for="placement.cogE">Ошибка ЦТ, ± м</label><input id="placement.cogE" type="number" step="0.05"></div>
+          <div class="field"><label for="placement.sMin">Мин. доля точки</label><input id="placement.sMin" type="number" step="0.01"></div>
+          <div class="field"><label for="placement.minGap">Мин. угол между точками, °</label><input id="placement.minGap" type="number" step="5"></div>
+          <div class="field"><label for="placement.z">Высота точек z, м</label><input id="placement.z" type="number" step="0.1"></div>
+        </div>
+        <div class="toolbar" style="margin-top:8px"><button type="button" class="primary" id="optimize">Подобрать точки</button></div>
+        <p class="hint">Программа ищет расстановку, при которой самая нагруженная точка нагружена минимально даже при ошибке ЦТ, ни один строп не провисает, а крюк ниже. Лучшие варианты проверяются полным расчётом рамы.</p>
+      </fieldset>
+
+      <fieldset>
         <legend>Коэффициенты</legend>
         <div class="fields">
           <div class="field"><label for="factors.daf">DAF</label><input id="factors.daf" type="number" step="0.01"></div>
@@ -219,7 +237,7 @@ textarea { width: 100%; min-height: 140px; font: 12px var(--f-mono); background:
 </div>
 
 <script type="module">
-import { calculate, polar, PRESET_TR1224 } from './frame-calc.js';
+import { calculate, polar, PRESET_TR1224, optimizeLiftPoints, cogMargin } from './frame-calc.js';
 
 
 const STORE = 'lifting-frame-input-v1';
@@ -282,7 +300,7 @@ $('form').addEventListener('input', (e) => {
     } else p[m[2]] = v;
   } else if (el.id.includes('.') && el.id !== 'json') {
     const [g, k] = el.id.split('.');
-    state[g][k] = el.type === 'number' ? parseFloat(el.value) : el.value;
+    state[g][k] = el.type === 'number' || el.id === 'placement.n' ? parseFloat(el.value) : el.value;
   } else return;
   update();
 });
@@ -302,6 +320,47 @@ $('copyJson').addEventListener('click', () => copy(JSON.stringify(state, null, 2
 $('applyJson').addEventListener('click', () => applyJson($('json').value));
 $('fileJson').addEventListener('change', async (e) => { const file = e.target.files[0]; if (file) applyJson(await file.text()); });
 $('copyReport').addEventListener('click', () => copy(reportText(), null, null));
+
+let options = null;
+$('optimize').addEventListener('click', () => {
+  const btn = $('optimize');
+  btn.disabled = true; btn.textContent = 'Подбираю…';
+  setTimeout(() => {
+    try { options = { list: optimizeLiftPoints(structuredClone(state), state.placement) }; }
+    catch (err) { options = { error: err.message }; }
+    btn.disabled = false; btn.textContent = 'Подобрать точки';
+    update();
+    $('out').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 20);
+});
+$('out').addEventListener('click', (e) => {
+  const i = e.target.dataset.apply;
+  if (i === undefined || !options?.list) return;
+  state.points = structuredClone(options.list[+i].points);
+  options = null;
+  renderPoints(); update();
+});
+
+function optionsCard() {
+  if (!options) return '';
+  if (options.error) return `<div class="status bad">Подбор точек: ${esc(options.error)}</div>`;
+  const cur = last ? cogMargin(state.points, state.cargo.xg, state.cargo.yg) : NaN;
+  return `<div class="card"><h2>Варианты расстановки точек</h2>
+    <div class="scroll"><table>
+      <thead><tr><th></th><th>Схема в целом</th><th>Точки (угол / радиус)</th><th>Запас по ЦТ, м</th><th>Доли ± ЦТ</th><th>Крюк, м</th><th>Рама</th></tr></thead>
+      <tbody>${options.list.map((o, i) => `<tr>
+        <td><button type="button" data-apply="${i}">Применить ${i + 1}</button></td>
+        <td>${pill(o.util)} <span class="hint">${o.governs}</span></td>
+        <td class="num">${o.polar.map((p) => `${f(p.a, 0)}°/${f(p.r, 2)}`).join(' · ')}</td>
+        <td class="num">${f(o.margin, 2)}</td>
+        <td class="num">${f(o.sMinW, 3)}–${f(o.sMaxW, 3)}</td>
+        <td class="num">${f(o.hook, 2)}</td>
+        <td class="num">${esc(o.sec)} · ${f(o.frameMass, 2)} т</td>
+        </tr>`).join('')}</tbody>
+    </table></div>
+    <p class="hint">Запас по ЦТ — на сколько можно сместить ЦТ, прежде чем строп провиснет; у текущих точек ${f(cur, 2)} м. «Схема в целом» — наибольший коэффициент по точкам, стержням, проушинам, стропам и скобам. Для TR1224 приварка к бую запрещена: подбор служит для новых буёв и для оценки существующих точек.</p>
+  </div>`;
+}
 
 function applyJson(text) {
   try {
@@ -350,7 +409,7 @@ function render(r) {
   const issues = verdict(r);
   const maxP = Math.max(...r.pts.map((p) => p.P / p.wll));
   const minSF = Math.min(...r.upper.map((u) => u.sf), ...r.lower.map((u) => u.sf));
-  $('out').innerHTML = `
+  $('out').innerHTML = optionsCard() + `
     <div class="status ${issues.length ? 'bad' : 'ok'}">${issues.length ? 'Схема не проходит:' : 'Все проверки пройдены. Схема работоспособна в рамках принятых допущений.'}
       ${issues.length ? `<ul>${issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}</div>
 
@@ -374,7 +433,7 @@ function render(r) {
         <thead><tr><th>Точка</th><th>Доля s</th><th>P, т</th><th>P/WLL</th><th>V, т</th><th>Плечо, м</th><th>L ветви, м</th><th>Угол °</th><th>T, т</th><th>H, т</th><th>Низ. строп, м</th></tr></thead>
         <tbody>${r.pts.map((p) => `<tr><td>${esc(p.name)}</td><td class="num">${f(p.share, 4)}</td><td class="num">${f(p.P)}</td><td>${pill(p.P / p.wll)}</td><td class="num">${f(p.V)}</td><td class="num">${f(p.d, 2)}</td><td class="num">${f(p.Lleg, 2)}</td><td class="num">${f(p.angle)}</td><td class="num">${f(p.T)}</td><td class="num">${f(p.H)}</td><td class="num">${f(p.lowerLen, 2)}</td></tr>`).join('')}</tbody>
       </table></div>
-      <p class="hint">Требуемая h при угле ${state.frame.minAngle}°: ${f(r.hReq, 2)} м, принято ${f(r.h, 1)} м. Невязка ΣH = ${f(r.sumH, 3)} т.</p>
+      <p class="hint">Требуемая h при угле ${state.frame.minAngle}°: ${f(r.hReq, 2)} м, принято ${f(r.h, 1)} м. Невязка ΣH = ${f(r.sumH, 3)} т. Запас по ЦТ до провисания стропа: ${f(cogMargin(state.points, state.cargo.xg, state.cargo.yg), 2)} м.</p>
     </div>
 
     <div class="card"><h2>2. Стержни рамы · труба ${esc(r.sec.name)} S355</h2>

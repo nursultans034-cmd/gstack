@@ -311,6 +311,203 @@ export function calculate(input) {
   return runWithSection(input, pipeSection(input.frame.D, input.frame.t));
 }
 
+// ---------------------------------------------------------------------------
+// Подбор точек подвеса.
+// Доли нагрузки линейны по положению ЦТ: s_i = a_i + b_i·x_g + c_i·y_g. Поэтому худшая доля при
+// неопределённости ЦТ в круге радиуса e равна a_i + e·√(b_i² + c_i²) — считается точно, без перебора ЦТ.
+
+// Доли и их чувствительность к смещению ЦТ для набора точек.
+export function shareSensitivity(points, xg, yg) {
+  const rows = [points.map(() => 1), points.map((p) => p.x), points.map((p) => p.y)];
+  const M = rows.map((ri) => rows.map((rj) => ri.reduce((s, v, k) => s + v * rj[k], 0)));
+  const l0 = solve3(M, [1, xg, yg]);
+  if (!l0) return null;
+  const lx = solve3(M, [0, 1, 0]);
+  const ly = solve3(M, [0, 0, 1]);
+  return points.map((p) => {
+    const s = l0[0] + l0[1] * p.x + l0[2] * p.y;
+    const g = Math.hypot(lx[0] + lx[1] * p.x + lx[2] * p.y, ly[0] + ly[1] * p.x + ly[2] * p.y);
+    return { s, g };
+  });
+}
+
+// Запас устойчивости по ЦТ: расстояние от ЦТ до ближайшей стороны опорного многоугольника, м.
+// На столько можно сместить ЦТ, прежде чем один из стропов провиснет (для 3 точек — точно).
+export function cogMargin(points, xg, yg) {
+  const order = perimeterOrder(points, xg, yg);
+  let m = Infinity;
+  for (let k = 0; k < order.length; k++) {
+    const a = points[order[k]], b = points[order[(k + 1) % order.length]];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    // Обход по часовой (угол от оси y): ЦТ внутри, если лежит справа от каждой стороны.
+    const cross = ((b.x - a.x) * (yg - a.y) - (b.y - a.y) * (xg - a.x)) / L;
+    m = Math.min(m, -cross);
+  }
+  return m;
+}
+
+// Запретные секторы: строка "290-310; 350-10" → [[290,310],[350,10]].
+export function parseSectors(text) {
+  return String(text || '')
+    .split(/[;,]/)
+    .map((s) => s.trim().match(/^(-?\d+(?:\.\d+)?)\s*[-–]\s*(-?\d+(?:\.\d+)?)$/))
+    .filter(Boolean)
+    .map((m) => [norm360(+m[1]), norm360(+m[2])]);
+}
+
+function norm360(a) { return ((a % 360) + 360) % 360; }
+
+function inSector(a, [from, to]) {
+  a = norm360(a);
+  return from <= to ? a >= from && a <= to : a >= from || a <= to;
+}
+
+function angGap(a, b) { const d = Math.abs(norm360(a) - norm360(b)); return Math.min(d, 360 - d); }
+
+// Детерминированный генератор случайных чисел — подбор воспроизводим.
+function rng(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Коэффициент использования по всей схеме: точки, стержни, проушины, стропы, скобы.
+export function governingUtil(r, input) {
+  const sfReq = input.rigging.sfReq;
+  const parts = {
+    точки: Math.max(...r.pts.map((p) => p.P / p.wll)),
+    стержни: r.maxUtil,
+    проушины: r.padeye.util,
+    стропы: sfReq / Math.min(...r.upper.map((u) => u.sf), ...r.lower.map((u) => u.sf)),
+    скобы: Math.max(...r.upper.map((u) => u.shackle)) / input.rigging.shackleUpper,
+  };
+  let key = 'точки';
+  for (const k of Object.keys(parts)) if (parts[k] > parts[key]) key = k;
+  return { util: parts[key], governs: key, parts };
+}
+
+// Подбор позиций точек подвеса на буе.
+// pl: { n, rMin, rMax, sectors, cogE, wll, minGap, sMin, z }
+export function optimizeLiftPoints(input, pl) {
+  const { cargo, factors } = input;
+  const n = pl.n;
+  const sectors = parseSectors(pl.sectors);
+  const skl = n === 3 ? 1 : factors.skl;
+  const kLoad = cargo.mass * cargo.kWeight * cargo.kCoG * skl / pl.wll;
+  const tanA = Math.tan((input.frame.minAngle * Math.PI) / 180);
+  const xg = cargo.xg, yg = cargo.yg;
+  const free = (a) => !sectors.some((s) => inSector(a, s));
+
+  // Быстрая оценка варианта: худшая нагрузка точки (с учётом ошибки ЦТ) + малый штраф за высоту крюка.
+  const fast = (cand) => {
+    for (const c of cand) {
+      if (!free(c.a) || c.r < pl.rMin - 1e-9 || c.r > pl.rMax + 1e-9) return null;
+    }
+    const sorted = [...cand].sort((p, q) => p.a - q.a);
+    for (let k = 0; k < n; k++) {
+      if (angGap(sorted[k].a, sorted[(k + 1) % n].a) < pl.minGap) return null;
+    }
+    const pts = cand.map((c) => polarXY(c.a, c.r));
+    const sens = shareSensitivity(pts, xg, yg);
+    if (!sens) return null;
+    let sMaxW = 0, sMinW = Infinity;
+    for (const { s, g } of sens) {
+      sMaxW = Math.max(sMaxW, s + pl.cogE * g);
+      sMinW = Math.min(sMinW, s - pl.cogE * g);
+    }
+    if (sMinW < pl.sMin) return null;
+    const dMax = Math.max(...pts.map((p) => Math.hypot(p.x - xg, p.y - yg)));
+    const h = dMax * tanA;
+    return { score: sMaxW * kLoad + 0.02 * h, uPoint: sMaxW * kLoad, sMaxW, sMinW, h };
+  };
+
+  // 1. Случайный поиск.
+  const rand = rng(12345);
+  const pool = [];
+  for (let it = 0; it < 60000; it++) {
+    const cand = Array.from({ length: n }, () => ({
+      a: Math.round(rand() * 72) * 5 % 360,
+      r: pl.rMin + (pl.rMax - pl.rMin) * rand(),
+    }));
+    const f = fast(cand);
+    if (f) pool.push({ cand, f });
+  }
+  // Равномерная расстановка как стартовая точка — проверяется всегда.
+  for (let rot = 0; rot < 360 / n; rot += 5) {
+    for (const r of [pl.rMin, (pl.rMin + pl.rMax) / 2, pl.rMax]) {
+      const cand = Array.from({ length: n }, (_, k) => ({ a: norm360(rot + (k * 360) / n), r }));
+      const f = fast(cand);
+      if (f) pool.push({ cand, f });
+    }
+  }
+  if (!pool.length) {
+    throw new Error('Нет допустимой расстановки: расширьте диапазон радиусов, сузьте запретные секторы или уменьшите неопределённость ЦТ.');
+  }
+  pool.sort((p, q) => p.f.score - q.f.score);
+
+  // 2. Локальное уточнение лучших: шаг по углу 1°, по радиусу 0,05 м.
+  const refine = ({ cand, f }) => {
+    let best = { cand: cand.map((c) => ({ ...c })), f };
+    let improved = true;
+    while (improved) {
+      improved = false;
+      for (let i = 0; i < n; i++) {
+        for (const [da, dr] of [[1, 0], [-1, 0], [0, 0.05], [0, -0.05], [1, 0.05], [-1, -0.05], [1, -0.05], [-1, 0.05]]) {
+          const c2 = best.cand.map((c) => ({ ...c }));
+          c2[i].a = norm360(c2[i].a + da);
+          c2[i].r = Math.round((c2[i].r + dr) * 100) / 100;
+          const f2 = fast(c2);
+          if (f2 && f2.score < best.f.score - 1e-9) { best = { cand: c2, f: f2 }; improved = true; }
+        }
+      }
+    }
+    return best;
+  };
+  const refined = pool.slice(0, 40).map(refine).sort((p, q) => p.f.score - q.f.score);
+
+  // 3. Отбор различающихся вариантов и полный расчёт рамы для каждого.
+  const distinct = [];
+  for (const v of refined) {
+    const key = [...v.cand].sort((p, q) => p.a - q.a);
+    const same = distinct.some((d) => {
+      const k2 = [...d.cand].sort((p, q) => p.a - q.a);
+      return key.every((c, i) => angGap(c.a, k2[i].a) < 8 && Math.abs(c.r - k2[i].r) < 0.15);
+    });
+    if (!same) distinct.push(v);
+    if (distinct.length >= 6) break;
+  }
+
+  const options = [];
+  for (const v of distinct) {
+    const points = [...v.cand]
+      .sort((p, q) => p.a - q.a)
+      .map((c) => ({ name: `${Math.round(c.a)}°`, ...polarXY(c.a, c.r), z: pl.z, wll: pl.wll, a: c.a, rr: c.r }));
+    const trial = { ...input, points: points.map(({ name, x, y, z, wll }) => ({ name, x, y, z, wll })) };
+    let full;
+    try { full = calculate(trial); } catch { continue; }
+    const gov = governingUtil(full, trial);
+    options.push({
+      points: trial.points,
+      polar: points.map((p) => ({ a: p.a, r: p.rr })),
+      sMaxW: v.f.sMaxW, sMinW: v.f.sMinW,
+      margin: cogMargin(trial.points, xg, yg),
+      shares: full.shares, h: full.h, hook: full.hook, frameMass: full.frameMass, sec: full.sec.name,
+      util: gov.util, governs: gov.governs,
+    });
+  }
+  options.sort((p, q) => p.util - q.util || p.hook - q.hook);
+  return options.slice(0, 3);
+}
+
+function polarXY(a, r) {
+  const t = (a * Math.PI) / 180;
+  return { x: r * Math.sin(t), y: r * Math.cos(t) };
+}
+
 // Исходные данные: буй CALM TR1224 (КТК-Р, проект 1-1962-0).
 export const PRESET_TR1224 = {
   cargo: { name: 'Буй CALM TR1224', mass: 320, kWeight: 1.1, kCoG: 1.1, xg: 0, yg: 0 },
@@ -331,6 +528,8 @@ export const PRESET_TR1224 = {
   },
   // Корпус Ø12 × 5,3 м, спайдер ~1,5 м, рубка Ø9 × 4 м, навигационная мачта ~8 м над палубой.
   buoy: { hullD: 12, hullH: 5.3, spider: 1.5, houseD: 9, houseH: 4, mast: 8 },
+  // Подбор новых точек: кольцо между рубкой и бортом, сектор мачты (~300°) закрыт.
+  placement: { n: 3, rMin: 4.8, rMax: 5.6, sectors: '290-310', cogE: 0.3, wll: 300, minGap: 60, sMin: 0.1, z: 7.3 },
 };
 
 export function polar(angleDeg, r) {

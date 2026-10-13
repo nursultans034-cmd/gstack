@@ -1,5 +1,5 @@
 // Сверка ядра с расчётной запиской TR1224 (CLAUDE.md проекта). Запуск: node contrib/lifting-frame/verify.mjs
-import { calculate, PRESET_TR1224 } from './frame-calc.js';
+import { calculate, PRESET_TR1224, optimizeLiftPoints, cogMargin } from './frame-calc.js';
 
 const r = calculate(structuredClone(PRESET_TR1224));
 const expect = [
@@ -34,4 +34,21 @@ for (const [name, got, want, tol] of expect) {
 for (const m of r.members) console.log(`     ${m.label}: L=${m.L.toFixed(2)} N=${m.N.toFixed(1)} λ=${m.check.lam.toFixed(1)} Fa=${m.check.Fa.toFixed(1)} fa=${m.check.fa.toFixed(1)} H1-1=${m.check.H11.toFixed(3)} H1-2=${m.check.H12.toFixed(3)} δ=${m.check.defl.toFixed(1)}`);
 const auto = calculate({ ...structuredClone(PRESET_TR1224), frame: { ...PRESET_TR1224.frame, sectionMode: 'auto', massMode: 'auto' } });
 console.log(`Автоподбор: ${auto.sec.name}, max ${auto.maxUtil.toFixed(2)}, рама ${auto.frameMass.toFixed(2)} т`);
+
+// Подбор точек: ЦТ в центре, без запретов — должна выйти равномерная расстановка (доли ≈ 1/3).
+const P0 = structuredClone(PRESET_TR1224);
+const t0 = performance.now();
+const o1 = optimizeLiftPoints(P0, { ...P0.placement, sectors: '' });
+const gaps = o1[0].polar.map((p, i, a) => (a[(i + 1) % a.length].a - p.a + 360) % 360);
+const evenOk = Math.max(...o1[0].shares) - Math.min(...o1[0].shares) < 0.01 && gaps.every((g) => Math.abs(g - 120) < 3);
+if (!evenOk) fail++;
+console.log(`${evenOk ? 'OK  ' : 'FAIL'} подбор, ЦТ в центре: углы ${o1[0].polar.map((p) => p.a.toFixed(0) + '°/' + p.r.toFixed(2)).join(', ')}; доли ${o1[0].shares.map((s) => s.toFixed(3)).join(' ')} (${(performance.now() - t0).toFixed(0)} мс)`);
+// Смещённый ЦТ и сектор мачты: ни одна точка не в секторе, худшая доля не хуже, чем у текущих точек.
+const P1 = structuredClone(PRESET_TR1224); P1.cargo.xg = 0.4; P1.cargo.yg = -0.2;
+const o2 = optimizeLiftPoints(P1, P1.placement);
+const inMast = o2[0].polar.some((p) => p.a >= 290 && p.a <= 310);
+const cur = calculate(structuredClone(P1));
+const better = Math.max(...o2[0].shares) <= Math.max(...cur.shares) + 1e-6 && !inMast;
+if (!better) fail++;
+console.log(`${better ? 'OK  ' : 'FAIL'} подбор, ЦТ (0,4; −0,2), мачта 290–310: ${o2[0].polar.map((p) => p.a.toFixed(0) + '°/' + p.r.toFixed(2)).join(', ')}; макс. доля ${Math.max(...o2[0].shares).toFixed(3)} против ${Math.max(...cur.shares).toFixed(3)} у текущих; запас по ЦТ ${o2[0].margin.toFixed(2)} м против ${cogMargin(P1.points, 0.4, -0.2).toFixed(2)}`);
 process.exit(fail ? 1 : 0);
