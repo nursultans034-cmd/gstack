@@ -110,14 +110,14 @@ fieldset.auto { border-color: var(--accent); }
   <div class="grid">
     <form class="inputs" id="form" autocomplete="off">
       <fieldset class="auto">
-        <legend>Автопроект по документам буя</legend>
+        <legend id="autoLegend">Автопроект по документам буя</legend>
         <ol class="steps">
-          <li><b>Документы.</b> Весовой отчёт, общий вид, схема подъёма, чертежи надстройки и проушин: PDF или фото.
+          <li id="stepDocs"><b>Документы.</b> Весовой отчёт, общий вид, схема подъёма, чертежи надстройки и проушин: PDF или фото.
             <input type="file" id="docs" multiple accept=".pdf,application/pdf,image/png,image/jpeg,image/webp" aria-label="Документы буя">
             <div class="toolbar"><button type="button" class="primary" id="readDocs">Считать данные</button><button type="button" id="stopRead" hidden>Стоп</button></div>
             <p class="hint" id="readMsg">Claude прочитает документы и найдёт массу, ЦТ, размеры, мачты и проушины. Ничего не попадёт в расчёт без вашего подтверждения.</p>
           </li>
-          <li><b>Проверка.</b> Считанные значения появятся справа: отметьте, что перенести в форму.</li>
+          <li id="stepCheck"><b>Проверка.</b> Считанные значения появятся справа: отметьте, что перенести в форму.</li>
           <li><b>Автопроект.</b> Программа подберёт высоты, стропы, трубу рамы, скобы и проушины и проверит схему.
             <label class="check"><input type="checkbox" id="auto.placePoints"> подобрать новые точки подвеса (иначе — существующие проушины)</label>
             <div class="fields"><div class="field"><label for="auto.clearance">Зазор рамы над мачтой, м</label><input id="auto.clearance" type="number" step="0.1"></div></div>
@@ -397,11 +397,17 @@ function optionsCard() {
 let sample = null, downloads = null, readCtl = null;
 window.claude?.use('sample').then((s) => { sample = s; caps(); });
 window.claude?.use('downloads').then((d) => { downloads = d; caps(); });
+// Автономная версия (LiftingFrame.exe): страница открыта в обычном браузере, Claude нет.
+const OFFLINE = !window.claude;
 function caps() {
   $('readDocs').disabled = !sample;
   if (!sample) $('readMsg').textContent = 'Чтение документов доступно, когда страница открыта в Claude. Данные можно ввести вручную.';
-  $('saveReport').hidden = !downloads;
-  $('saveJson').hidden = !downloads;
+  if (OFFLINE) {
+    $('stepDocs').hidden = true; $('stepCheck').hidden = true;
+    $('autoLegend').textContent = 'Автопроект';
+  }
+  $('saveReport').hidden = !downloads && !OFFLINE;
+  $('saveJson').hidden = !downloads && !OFFLINE;
 }
 caps();
 $('readMsg').dataset.idle = $('readMsg').textContent;
@@ -590,12 +596,23 @@ function autoCard() {
 }
 
 async function saveFile(filename, data) {
+  if (!downloads) {
+    // Обычный браузер: файл уходит в папку «Загрузки».
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([data], { type: filename.endsWith('.json') ? 'application/json' : 'text/plain;charset=utf-8' }));
+    a.download = filename;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    return;
+  }
   try { await downloads.save({ filename, data }); }
   catch (e) { if (e?.code !== 'declined') flash('Файл не сохранён'); }
 }
 const slug = () => (state.cargo.name || 'буй').replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 40);
-$('saveReport').addEventListener('click', () => saveFile(`Рама_${slug()}.txt`, reportText()));
-$('saveJson').addEventListener('click', () => saveFile(`Данные_${slug()}.json`, JSON.stringify(state, null, 2)));
+// В обычном браузере кириллица в имени загрузки может замениться на «download» — там имя латиницей с датой.
+const fname = (ru, en, ext) => (downloads ? `${ru}_${slug()}.${ext}` : `${en}_${new Date().toISOString().slice(0, 10)}.${ext}`);
+$('saveReport').addEventListener('click', () => saveFile(fname('Рама', 'lifting-frame-report', 'txt'), reportText()));
+$('saveJson').addEventListener('click', () => saveFile(fname('Данные', 'lifting-frame-data', 'json'), JSON.stringify(state, null, 2)));
 
 function applyJson(text) {
   try {
